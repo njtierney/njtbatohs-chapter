@@ -1,0 +1,3 @@
+# Bayesian Approaches to Occupational Health Surveillance
+
+This repository contains key analysis code for Bayesian modelling and data analysis used in creating the book chapter, "Bayesian Modelling to Assist Inference on Health Outcomes in Occupational Health Surveillance". The code is provided to demonstrate how to perform the models and create figures. It will not work as the data can not be provided, for sensitivity reasons.
