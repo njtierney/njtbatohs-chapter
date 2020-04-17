@@ -1,0 +1,410 @@
+---
+title: "diagnostics"
+author: "Nicholas Tierney"
+date: "`r format(Sys.time(), '%x at %H:%M:%S %Z')`"
+output:
+  html_document:
+    keep_md: yes
+    theme: flatly
+    toc: yes
+    toc_float: yes
+params:
+    n_iterations_adapt: 1000
+    n_iterations_burnin: 500
+    n_iterations_model: 500
+    n_thin: 1
+    outcome: "fev1_perc"
+---
+
+Bleep bloop, I'm running a script to generate these diagnostic plots.
+
+Here is some important information:
+
+- The model predicted `r params$outcome` 
+- # adaptive samples was `r params$n_iterations_adapt`
+- # burnin samples was `r params$n_iterations_burnin`
+- # burnin model iterations was `r params$n_iterations_model`
+- # thinning of samples was `r params$n_thin`
+
+
+```{r setup, include = FALSE}
+
+knitr::opts_chunk$set(message = FALSE,
+                      warning = FALSE,
+                      cache = TRUE,
+                      fig.align = "center",
+                      fig.show = "hold",
+                      autodep = TRUE,
+                      dpi = 100)
+
+analysis_path <- "/Users/tierneyn/PhD/code/R/njtbatohs"
+knitr::opts_knit$set(analysis_path)
+
+```
+
+
+```{r load-libraries, include = FALSE}
+
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(purrr)
+library(rjags)
+library(ggmcmc)
+library(ggthemes)
+library(ggExtra)
+library(data.table)
+
+```
+
+
+```{r load-output, echo = TRUE, cache.lazy=FALSE}
+
+system.time(
+    jags_model_dt <- fread(sprintf("%s/analysis/outputs/03_post_process_output/output_%s/jags_model_dt.csv",
+              analysis_path,
+              params$outcome))
+)
+
+system.time(
+jags_model_fit <-
+    readRDS(sprintf("%s/analysis/outputs/02_fit_output/output_%s/jags_model_fit.rds",
+                    analysis_path,
+                    params$outcome))
+)
+
+
+```
+
+# Diagnostics
+
+
+```{r tidy-model-diagnosis, include = TRUE, cache.lazy = FALSE, echo = TRUE}
+
+library(ggmcmc)
+
+system.time(
+jags_diagnosis_plot <- ggs(jags_model_fit)
+)
+
+```
+
+```{r list-parameters}
+model_params <- c("y_pred", # predictions from Y
+                  "mu", # mu results
+                  "beta_all", #
+                  "beta_d", ## instead of beta[ID[i]], is is beta_d[ID[i]]
+                  "beta_0", ## instead of alpha[ID[i]], it is beta_0[ID[i]]
+                  "beta_dc", # the overall intercept for the number of days
+                  "beta_0c", # the overall intercept for the... intercept.
+                  "tau_0", # tau_0 instead of tau_alpha
+                  "tau_d", # tau_d instead of tau_beta
+                  "tau_y",
+                  "sigma_0", # sigma_0 instead of sigma_alpha
+                  "sigma_d", # sigma_d instead of sigma_beta
+                  "sigma_y")
+```
+
+
+```{r filter-y-pred}
+
+# system.time({
+### Y.pred -------------------------------------------------------------------
+jags_model_tidy_y_pred_1_5 <- jags_diagnosis_plot %>%
+    filter(
+        Parameter == "y_pred[1]" |
+           Parameter == "y_pred[2]" 
+        )
+
+```
+
+```{r filter-mu}
+
+### mu -----------------------------------------------------------------------
+
+jags_model_tidy_mu_1_5 <- jags_diagnosis_plot %>%
+    filter(
+        Parameter == "mu[1]" |
+        Parameter == "mu[2]" 
+        )
+
+```
+
+```{r filter-beta-all-1-6}
+
+### beta.all 1 - 6--------------------------------------------------------------
+jags_model_tidy_beta_all_1_6 <- jags_diagnosis_plot %>%
+    filter(Parameter == "beta_all[1]" |
+           Parameter == "beta_all[2]" |
+           Parameter == "beta_all[3]" |
+           Parameter == "beta_all[4]" |
+           Parameter == "beta_all[5]" |
+           Parameter == "beta_all[6]" )
+
+```
+
+```{r filter-all-beta-all}
+
+system.time(
+jags_model_tidy_all_beta_all <- jags_diagnosis_plot %>%
+    filter(grepl("beta_all", Parameter))
+)
+```
+
+
+```{r filter-beta-all-7-12}
+
+### beta.all 7 - 12-------------------------------------------------------------
+jags_model_tidy_beta_all_7_12 <- jags_diagnosis_plot %>%
+    filter(Parameter == "beta_all[7]" |
+           Parameter == "beta_all[8]" |
+           Parameter == "beta_all[9]" |
+           Parameter == "beta_all[10]" |
+           Parameter == "beta_all[11]" |
+           Parameter == "beta_all[12]" )
+
+```
+
+```{r filter-beta-all-13-17}
+
+### beta.all 13 - 17------------------------------------------------------------
+jags_model_tidy_beta_all_13_17 <- jags_diagnosis_plot %>%
+    filter(Parameter == "beta_all[13]" |
+           Parameter == "beta_all[14]" |
+           Parameter == "beta_all[15]" |
+           Parameter == "beta_all[16]" |
+           Parameter == "beta_all[17]" )
+
+```
+
+```{r filter-beta-d-1-5}
+
+### beta_d ---------------------------------------------------------------------
+jags_model_tidy_beta_d_1_5 <- jags_diagnosis_plot %>%
+    filter(Parameter == "beta_d[1]" |
+           Parameter == "beta_d[2]" 
+           )
+
+```
+
+```{r filter-beta-0-1-5}
+
+### beta_0 ---------------------------------------------------------------------
+jags_model_tidy_beta_0_1_5 <- jags_diagnosis_plot %>%
+    filter(Parameter == "beta_0[1]" |
+           Parameter == "beta_0[2]" 
+           )
+
+```
+
+```{r filter-beta-dc}
+
+### beta_dc ---------------------------------------------------------------------
+# the overall intercept for the number of days
+jags_model_tidy_beta_dc <- jags_diagnosis_plot %>%
+    filter(Parameter == "beta_dc")
+
+```
+
+```{r filter-beta-0c}
+
+### beta_dc ---------------------------------------------------------------------
+# the overall intercept for the... intercept.
+jags_model_tidy_beta_0c <- jags_diagnosis_plot %>%
+    filter(Parameter == "beta_0c")
+
+```
+
+```{r filter-tau-sigma}
+
+### tau ----------------------------------------------------------------------
+jags_model_tidy_taus <- jags_diagnosis_plot %>%
+    filter(Parameter == "tau_0" | # tau_0 instead of tau_alpha
+           Parameter == "tau_d" | # tau_d instead of tau_beta
+           Parameter == "tau_y")
+
+
+### sigma --------------------------------------------------------------------
+jags_model_tidy_sigmas <- jags_diagnosis_plot %>%
+    filter(Parameter == "sigma_0" | # sigma_0 instead of tau_alpha
+           Parameter == "sigma_d" | # sigma_d instead of tau_beta
+           Parameter == "sigma_y")
+# })
+```
+
+
+```{r fun-trace-dens}
+# this function places the traceplots and densities side by side
+ggs_trace_dens <- function(x){
+    
+p1 <- ggs_traceplot(x) + theme(legend.position = "none")
+p2 <- ggs_density(x) + theme(legend.position = "none")
+
+gridExtra::grid.arrange(p1,
+                        p2,
+                        ncol = 2, 
+                        nrow = 1)
+
+}
+
+```
+
+## Outcome
+
+
+```{r diagnostics-outcome, fig.height = 10, fig.width=8, fig.asp = NULL, out.width = "100%", fig.align = "default"}
+
+# density and traceplot
+ggs_trace_dens(jags_model_tidy_y_pred_1_5)
+
+# })
+```
+
+# ### mu 
+
+```{r diagnostics-mu, fig.height = 10, fig.width=8, fig.asp = NULL, out.width = "100%", fig.align = "default"}
+
+# system.time({
+# density and traceplot
+ggs_trace_dens(jags_model_tidy_mu_1_5)
+# })
+```
+
+## All beta terms
+
+```{r diagnostics-all-beta-all, fig.height = 30, fig.width=8, fig.asp = NULL, out.width = "100%", fig.align = "default"}
+# 
+# system.time({
+    
+# density and traceplot
+ggs_trace_dens(jags_model_tidy_all_beta_all)
+# })
+
+
+## Alpha (individual Intercept)-----------------------------------------------
+
+```{r diagnostics-alpha-i, fig.height = 10, fig.width=8, fig.asp = NULL, out.width = "100%", fig.align = "default"}
+
+# 
+# system.time({
+    
+# density and traceplot
+ggs_trace_dens(jags_model_tidy_beta_0_1_5)
+
+# })
+```
+
+
+## Beta (Individual change from population)
+
+```{r diagnostics-beta-i, fig.height = 10, fig.width=8, fig.asp = NULL, out.width = "100%", fig.align = "default"}
+# 
+# system.time({
+    
+# density and traceplot
+ggs_trace_dens(jags_model_tidy_beta_d_1_5)
+
+
+# })
+```
+
+## taus 
+
+```{r diagnostics-taus, fig.height = 10, fig.width=8, fig.asp = NULL, out.width = "100%", fig.align = "default"}
+
+# system.time({
+    
+# density and traceplot
+ggs_trace_dens(jags_model_tidy_taus)
+
+
+
+# })
+```
+
+## Sigmas 
+
+
+```{r diagnostics-sigmas, fig.height = 10, fig.width=8, fig.asp = NULL, out.width = "100%", fig.align = "default"}
+
+# system.time({
+    
+# density and traceplot
+ggs_trace_dens(jags_model_tidy_sigmas)
+
+
+
+# })
+```
+
+# Autocorrelation plots
+
+```{r autocorrelation-plots, fig.height = 10, fig.width=8, fig.asp = NULL, out.width = "100%", fig.align = "default"}
+## Autocorrelation
+## Y.pred
+ggs_autocorrelation(jags_model_tidy_y_pred_1_5)
+
+ggs_autocorrelation(jags_model_tidy_mu_1_5)
+
+ggs_autocorrelation(jags_model_tidy_all_beta_all)
+
+ggs_autocorrelation(jags_model_tidy_beta_all_1_6)
+
+ggs_autocorrelation(jags_model_tidy_beta_all_7_12)
+
+ggs_autocorrelation(jags_model_tidy_beta_all_13_17)
+
+ggs_autocorrelation(jags_model_tidy_beta_0_1_5)
+
+ggs_autocorrelation(jags_model_tidy_beta_d_1_5)
+
+ggs_autocorrelation(jags_model_tidy_taus)
+
+ggs_autocorrelation(jags_model_tidy_sigmas)
+```
+
+# Further diagnostics
+
+
+```{r}
+
+jags_model_fit_bmi <- jags_model_fit_all %>% pluck(1) %>% pluck(1)
+jags_model_fit_dias <- jags_model_fit_all %>% pluck(2) %>% pluck(1)
+jags_model_fit_sys <- jags_model_fit_all %>% pluck(3) %>% pluck(1)
+jags_model_fit_fev1 <- jags_model_fit_all %>% pluck(4) %>% pluck(1)
+
+all_jags_fits <- list(
+  bmi = jags_model_fit_bmi,
+  dias = jags_model_fit_dias,
+  sys = jags_model_fit_sys,
+  fev1 = jags_model_fit_fev1
+)
+
+system.time(
+all_ess <- map(all_jags_fits, coda::effectiveSize)
+)
+
+system.time(
+ess <- coda::effectiveSize(jags_model_fit[[1]])
+)
+system.time(
+geweke_diag <- coda::geweke.diag(jags_model_fit[[1]])
+)
+
+geweke_df <- tibble(parameter = names(geweke_diag$z),
+                    geweke = geweke_diag$z)
+
+ess_df <- tibble(parameter = names(ess),
+                 ess = ess)
+
+
+geweke_df %>%
+  ggplot(aes(x = geweke)) + 
+  geom_density()
+
+ess_df %>%
+  ggplot(aes(x = ess)) + 
+  geom_density()
+
+```

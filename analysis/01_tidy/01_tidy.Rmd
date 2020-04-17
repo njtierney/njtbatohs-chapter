@@ -1,0 +1,773 @@
+---
+title: "tidy"
+author: "Nicholas Tierney"
+date: "`r format(Sys.time(), '%x at %H:%M:%S %Z')`"
+output: html_document
+params:
+    outcome: "fev1_perc"
+    data: "2015"
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(message = TRUE,
+                      warning = TRUE,
+                      error = TRUE,
+                      echo = FALSE,
+                      cache = FALSE)
+knitr::opts_knit$set(rprojroot::find_rstudio_root_file())
+analysis_path <- "/Users/tierneyn/PhD/code/R/njtbatohs"
+raw_data_path <- "/Users/tierneyn/njtbatohs-data/data/"
+use_data <- params$data
+```
+
+
+```{r load-libraries, include = FALSE}
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(readr)
+library(readxl)
+library(lubridate)
+library(feather)
+library(data.table)
+
+```
+
+```{r read-health-data, include = FALSE}
+
+dat_health_11 <- readr::read_csv(paste0(raw_data_path,"dat-05-11.csv")) %>%
+  mutate(seg_label = label_seg(seg)) %>%
+    # replace NAs
+  mutate(seg_label = if_else(is.na(seg_label),
+                             true = "unknown",
+                             false = seg_label,
+                             missing = "unknown"),
+         smok = ifelse(smok == 0,
+                       yes = "non_smoker",
+                       no = "smoker"),
+         sex = ifelse(sex == 1,
+                      yes = "female",
+                      no = "male"),
+         fev1_pred = fev1 / (fev1_perc/100),
+         fvc_pred = fvc / (fvc_perc/100))
+
+```
+
+```{r 2005-2015-data}
+
+dat_health_15 <- readr::read_csv(paste0(raw_data_path,"dat-05-15.csv")) %>%
+  mutate(
+    seg_number = label_seg_2(seg),
+    seg_label = label_seg(seg_number)) %>%
+    # add the NAs to the "unknown" SEG
+  mutate(seg_label = if_else(is.na(seg_label),
+                             true = "unknown",
+                             false = seg_label,
+                             missing = "unknown"),
+         smok = ifelse(smok == 0,
+                       yes = "non_smoker",
+                       no = "smoker"),
+         date = anytime::anydate(date),
+         dob = anytime::anydate(dob)) %>%
+    # remove unknown
+    filter(seg_label != "unknown") %>%
+    # remove imposible outliers
+    filter(fev1_perc < 200 | is.na(fev1_perc)) %>% 
+    # dim is 3225 33
+    filter(fev1_perc > 20 | is.na(fev1_perc)) %>%
+    # dim is 3224 33
+    filter(bmi < 75 | is.na(bmi)) %>%
+    # dim is 3223 33
+    filter(sys < 250 | is.na(sys))
+    # dim is 3222
+    # note: I have removed 4 outliers.
+
+```
+
+# Remaining tidying functions
+
+```{r munge-data-prep-10-year}
+
+# for the new 2005-2015 data
+
+dat_health_cut_1_15 <-
+dat_health_15 %>%
+  # we are only really interested in these variables
+  select(seg_label,
+         seg_number,
+         seg,
+         uin,
+         date,
+         fev1_perc,
+         sex,
+         dob,
+         smok,
+         bmi,
+         dias,
+         sys) %>%
+    arrange(uin, date) %>% 
+    # drop NAs for date
+    drop_na(date) %>%
+    # fill forward for individuals.
+    group_by(uin) %>%
+    tidyr::fill(smok, dob, sex, seg, seg_label, seg_number) %>%
+    ungroup() %>%
+    tidyr::drop_na(smok, seg_label, seg, seg_number) %>%
+    group_by(uin) %>%
+    arrange(date) %>%
+   mutate(lf_visit = 1:n(),
+          # number of days since visit
+          lf_days = difftime(date,
+                             lag(date),
+                             units = "days"),
+          # replace NA values with 0
+          lf_days = ifelse(is.na(lf_days),
+                           yes = 0,
+                           no = lf_days),
+          # calculate the days since arrival
+          days_since_arrival = cumsum(lf_days)) %>%
+  ungroup() %>%
+  mutate(ID = match(uin, uin %>% unique %>% sort),
+         row_id = 1:n())
+
+# add in a repeated SEG, that is the first SEG
+# Get the first SEG for each individual, make this the "initial SEG" column
+dat_health_cut_2_15 <-
+    dat_health_cut_1_15 %>%
+    group_by(ID) %>%
+    arrange(lf_visit) %>%
+    summarize(seg0 = first(seg_number)) %>%
+    left_join(dat_health_cut_1_15,
+              .,
+              by = "ID") %>%
+              ungroup()
+
+```
+
+
+```{r munge-data-prep-5-year}
+
+dat_health_cut_1_11 <-
+dat_health_11 %>%
+  # we are only really interested in these variables
+  select(seg_label,
+         # seg_number,
+         seg,
+         uin,
+         date,
+         fev1_perc,
+         sex,
+         dob,
+         smok,
+         bmi,
+         dias,
+         sys) %>%
+    arrange(uin, date) %>%
+    # drop NAs for date
+    drop_na(date) %>%
+    # fill forward for individuals.
+    group_by(uin) %>%
+    tidyr::fill(smok, dob, sex, seg, seg_label) %>%
+    ungroup() %>%
+    tidyr::drop_na(smok, seg_label, seg) %>%
+    group_by(uin) %>%
+    arrange(date) %>%
+   mutate(lf_visit = 1:n(),
+          # number of days since visit
+          lf_days = difftime(date,
+                             lag(date),
+                             units = "days"),
+          # replace NA values with 0
+          lf_days = ifelse(is.na(lf_days),
+                           yes = 0,
+                           no = lf_days),
+          # calculate the days since arrival
+          days_since_arrival = cumsum(lf_days)) %>%
+  ungroup() %>%
+  mutate(ID = match(uin, uin %>% unique %>% sort),
+         row_id = 1:n())
+
+# add in a repeated SEG, that is the first SEG
+# Get the first SEG for each individual, make this the "initial SEG" column
+dat_health_cut_2_11 <-
+    dat_health_cut_1_11 %>%
+    group_by(ID) %>%
+    arrange(lf_visit) %>%
+    summarize(seg0 = first(seg)) %>%
+    left_join(dat_health_cut_1_11,
+              .,
+              by = "ID") %>%
+              ungroup()
+
+```
+
+
+```{r read-dust-data}
+
+# there are a lot of variables with ND, Not Detected.
+# ND = Not Detected. Replace this with 0
+
+replace_ND <- function(x){
+
+  ifelse(x == "ND",
+         yes = 0,
+         no = parse_number(x))
+
+}
+
+dat_inhale_raw <- read_excel(
+    paste0(raw_data_path,
+           "particulate-sample-inhalable.xlsx")
+    ) %>%
+  mutate_at(1:11, replace_ND) %>% 
+  mutate(date_time = ymd(`Sample Date`),
+         year = year(date_time),
+         month = month(date_time))
+
+```
+
+
+```{r find-common-segs}
+
+# old code for 2005-2011 data ----
+
+# which SEGs are common to health and environmental data ---------------------
+    common_seg_11 <- intersect(unique(dat_inhale$SEG_align),
+                            unique(dat_health_cut_2_11$seg))
+
+# nest data by SEGs common to health and inhalable data ----------------------
+# We will then use this inhalable data to predict the dust
+    dat_by_seg <- dat_inhale %>%
+    rename(seg_key = SEG_align) %>%
+    select(date_time,
+           inhale_dust,
+           seg_key) %>%
+    mutate(seg_key = parse_number(seg_key)) %>%
+    # keep only those common SEGs
+    filter(seg_key %in% common_seg_11) %>%
+    group_by(seg_key) %>%
+    nest() %>%
+    arrange(seg_key)
+
+# run the loess model for each SEG. ------------------------------------------
+# to predict the dust
+    # Because it's nested that works out really wel
+    loess_by_seg <- dat_by_seg %>%
+    mutate(model = purrr::map(
+        data, ~ loess(as.numeric(inhale_dust) ~ as.numeric(date_time),
+                      data = .))
+        )
+
+# make a new dataframe with dates for the new segs --------------------------
+# this is the health data dates and those same SEGs as the dust data
+    new_by_seg_11 <- dat_health_cut_2_11 %>%
+    rename(seg_key = seg) %>%
+    mutate(date_time = as.numeric(date),
+           seg_key = parse_number(seg_key)) %>%
+    ungroup() %>%
+    select(seg_key,
+           date_time,
+           row_id) %>%
+    filter(seg_key %in% common_seg_11) %>%
+    group_by(seg_key) %>%
+    nest(.key = pred_data) %>%
+    arrange(seg_key)
+
+# predict the loess results to the health data ------------------------------
+# we join the loess by seg data onto the health data
+# this adds the column "pred_data"
+    loess_join_11 <- loess_by_seg %>%
+    left_join(new_by_seg_11,
+              by = "seg_key")
+
+    pred_box_11 <- vector("list", nrow(loess_join_11))
+
+    for(i in (1:nrow(loess_join_11))){
+        # i = 1
+        pred_box_11[[i]] <- data.frame(
+            new_dust_pred = predict(
+                object =  loess_join_11$model[[i]],
+                newdata = loess_join_11$pred_data[[i]]$date_time
+                ),
+            row_id = loess_join_11$pred_data[[i]]$row_id
+            )
+        }
+    dat_loess_pred_11 <- bind_rows(pred_box_11)
+
+```
+
+```{r find-common-segs-2005-2015}
+
+# for the 2005 - 2015 data
+
+# which SEGs are common to health and environmental data ---------------------
+    common_seg_15 <- intersect(unique(dat_inhale$SEG_align),
+                               unique(dat_health_cut_2_15$seg_number))
+
+# nest data by SEGs common to health and inhalable data ----------------------
+
+    dat_by_seg_15 <- dat_inhale %>%
+    rename(seg_key = SEG_align) %>%
+    select(date_time,
+           inhale_dust,
+           seg_key) %>%
+    mutate(seg_key = parse_number(seg_key)) %>%
+    # keep only those common SEGs
+    filter(seg_key %in% common_seg_15) %>%
+    group_by(seg_key) %>%
+    nest() %>%
+    arrange(seg_key)
+
+# run the loess model for each SEG. ------------------------------------------
+
+    # Because it's nested that works out really wel
+    loess_by_seg_15 <- dat_by_seg_15 %>%
+    mutate(model = purrr::map(
+        data, ~ loess(as.numeric(inhale_dust) ~ as.numeric(date_time),
+                      data = .))
+        )
+
+# make a new dataframe with dates for the new segs --------------------------
+
+    new_by_seg_15 <- dat_health_cut_2_15 %>%
+    rename(seg_key = seg_number) %>%
+    mutate(date_time = as.numeric(date),
+           seg_key = parse_number(seg_key)) %>%
+    ungroup() %>%
+    select(seg_key,
+           date_time,
+           row_id) %>%
+    filter(seg_key %in% common_seg_15) %>%
+    group_by(seg_key) %>%
+    nest(.key = pred_data) %>%
+    arrange(seg_key)
+
+# predict the loess results to the health data ------------------------------
+
+    loess_join_15 <- loess_by_seg_15 %>%
+    left_join(new_by_seg_15,
+              by = "seg_key")
+
+    pred_box_15 <- vector("list", nrow(loess_join_15))
+    
+    for(i in (1:nrow(loess_join_15))){
+        # i = 1
+        pred_box_15[[i]] <- data.frame(
+            new_dust_pred = predict(
+                object = loess_join_15$model[[i]],
+                newdata = loess_join_15$pred_data[[i]]$date_time
+                ),
+            row_id = loess_join_15$pred_data[[i]]$row_id
+            )
+        }
+    dat_loess_pred_15 <- bind_rows(pred_box_15)
+```
+
+```{r bind-loess-results-2011}
+
+# for 2005-2011 data -----
+# add the loess data into the health data
+dat_health_cut_3_11 <- dat_health_cut_2_11 %>%
+        left_join(dat_loess_pred_11,
+                  by = "row_id") %>%
+        mutate(seg_in_common_seg = seg %in% common_seg_11,
+               # fix the bug where it didn't fill in if new_dust_pred
+               # didn't have a value.
+               # we assign this a value of 0 for the moment.
+               new_dust_pred_join = if_else(seg_in_common_seg == TRUE &
+                                                !is.na(new_dust_pred),
+                                            true = new_dust_pred,
+                                            false = 0)) %>%
+    # drop the old new_dust_pred
+        select(-new_dust_pred) %>%
+        rename(new_dust_pred = new_dust_pred_join)
+
+```
+
+```{r bind_loess_results-15}
+
+# for the 2005 - 2015 data
+
+   dat_health_cut_3_15 <- dat_health_cut_2_15 %>%
+        left_join(dat_loess_pred_15,
+                  by = "row_id") %>%
+        mutate(seg_in_common_seg = seg_number %in% common_seg_15,
+               # fix the bug where it didn't fill in if new_dust_pred
+               # didn't have a value.
+               # we assign this a value of 0 for the moment.
+               new_dust_pred_join = if_else(seg_in_common_seg == TRUE &
+                                                !is.na(new_dust_pred),
+                                            true = new_dust_pred,
+                                            false = 0)) %>%
+    # drop the old new_dust_pred
+        select(-new_dust_pred) %>%
+        rename(new_dust_pred = new_dust_pred_join)
+
+```
+
+
+```{r munge-smoking-previously-2011}
+
+# for the 2005 - 2015 data
+
+# calculate if someone has been a smoker in the past -------------------------
+    # answer now in gist: https://gist.github.com/njtierney/54756cacb308a1a49ee25126da2723eb
+
+    dat_isba_11 <- dat_health_cut_3_11 %>%
+    group_by(ID) %>%
+    arrange(lf_days) %>%
+    mutate(smoked_prev_num = as.numeric(ifelse(cumsum(smok == "smoker") >= 1,
+                                        yes = 1, # has_smoked
+                                        no = 0))) %>% # non_smoker
+  # some wierd  error https://stackoverflow.com/questions/29224719/dplyr-error-strange-issue-when-combining-group-by-mutate-and-ifelse-is-it-a-b
+  # meant I had to do another ifelse
+  ungroup() %>%
+  mutate(smoked_previously = ifelse(smoked_prev_num == 1,
+                                    "smoke_previously",
+                                    "non_smoker"))
+
+```
+
+
+```{r munge-smoking-previously-2015}
+
+# for the 2005 - 2015 data
+
+# calculate if someone has been a smoker in the past -------------------------
+    # answer now in gist: https://gist.github.com/njtierney/54756cacb308a1a49ee25126da2723eb
+
+    dat_isba_15 <- dat_health_cut_3_15 %>%
+    group_by(ID) %>%
+    arrange(lf_days) %>%
+    mutate(smoked_prev_num = as.numeric(ifelse(cumsum(smok == "smoker") >= 1,
+                                        yes = 1, # has_smoked
+                                        no = 0))) %>% # non_smoker
+  # some wierd error https://stackoverflow.com/questions/29224719/dplyr-error-strange-issue-when-combining-group-by-mutate-and-ifelse-is-it-a-b
+  # meant I had to do another ifelse
+  ungroup %>%
+  mutate(smoked_previously = ifelse(smoked_prev_num == 1,
+                                    "smoke_previously",
+                                    "non_smoker"))
+
+```
+
+
+```{r add-one-visit-2011}
+
+# for the 2005-2015 data
+
+# add once visit to each person
+library(lazyeval)
+# how many days to add?
+n_days_added <- 365
+
+dat_isba_add_step_1_11 <-
+    dat_isba_11 %>%
+    arrange(ID, date) %>%
+    group_by(ID) %>%
+    # get the latest date
+    filter(date == max(date)) %>%
+    ungroup() %>%
+    # add 266 to the last date
+    mutate(days_since_arrival = days_since_arrival + n_days_added,
+           date = date + lubridate::days(n_days_added),
+           lf_visit = lf_visit + 1,
+           lf_days = lf_days + n_days_added)
+
+           # make these "updated" outcome values missing, as they are unknown
+dat_isba_add_step_1_11[params$outcome] <- -1
+           # jags can then estimate these...
+           # this is the "label" for FEV1 to predict
+
+dat_isba_add_step_2_11 <- bind_rows(dat_isba_add_step_1_11,
+                                     dat_isba_11)
+
+    # add a column that tells us which piece of data is forecasted
+dat_isba_add_step_2_11$forecasted <- 
+    as.logical(dat_isba_add_step_2_11[params$outcome] == -1)
+
+# find out which ones are forecasted
+which_forecasted_step_2_11 <- which(
+    dat_isba_add_step_2_11[params$outcome] == -1
+    )
+
+
+# make those NA now
+dat_isba_add_step_2_11[which_forecasted_step_2_11,params$outcome] <- NA
+    
+dat_isba_add_visit_11 <- dat_isba_add_step_2_11 %>%
+    arrange(ID, date)
+
+# add forecast indicator ------------------------------------------------------
+    rows_forecasted_11 <- which(dat_isba_add_visit_11$forecasted == TRUE)
+
+```
+
+
+```{r add-one-visit-2015}
+
+# for the 2005-2015 data
+
+# add once visit to each person
+library(lazyeval)
+# how many days to add?
+n_days_added <- 365
+
+dat_isba_add_step_1_15 <-
+    dat_isba_15 %>%
+    arrange(ID, date) %>%
+    group_by(ID) %>%
+    # get the latest date
+    filter(date == max(date)) %>%
+    ungroup() %>%
+    # add 266 to the last date
+    mutate(days_since_arrival = days_since_arrival + n_days_added,
+           date = date + lubridate::days(n_days_added),
+           lf_visit = lf_visit + 1,
+           lf_days = lf_days + n_days_added)
+
+           # make these "updated" outcome values missing, as they are unknown
+dat_isba_add_step_1_15[params$outcome] <- -1
+           # jags can then estimate these...
+           # this is the "label" for FEV1 to predict
+
+dat_isba_add_step_2_15 <- bind_rows(dat_isba_add_step_1_15,
+                                     dat_isba_15)
+
+    # add a column that tells us which piece of data is forecasted
+dat_isba_add_step_2_15$forecasted <- 
+    as.logical(dat_isba_add_step_2_15[params$outcome] == -1)
+
+# find out which ones are forecasted
+which_forecasted_step_2_15 <- which(dat_isba_add_step_2_15[params$outcome] == -1)
+
+# make those NA now
+dat_isba_add_step_2_15[which_forecasted_step_2_15,params$outcome] <- NA
+    
+dat_isba_add_visit_15 <- dat_isba_add_step_2_15 %>%
+    arrange(ID, date)
+
+# add forecast indicator ------------------------------------------------------
+    rows_forecasted_15 <- which(dat_isba_add_visit_15$forecasted == TRUE)
+
+```
+
+```{r prep-data-for-jags-fev1-2011}
+
+# data munging in prep for JAGS ---------------------------------------------
+
+    # put the data in a list for formatting with JAGS ------------------------
+
+    jags_dat_prep_11 <- list(
+        y = dat_isba_add_visit_11[[params$outcome]],
+        ID = dat_isba_add_visit_11$ID,
+        # change to days, for clarity
+        x = dat_isba_add_visit_11$days_since_arrival,
+        SEG = dat_isba_add_visit_11$seg,
+        gender = ifelse(dat_isba_add_visit_11$sex == "female",
+                        yes = 0,
+                        no = 1),
+                          # 0 = non-smoker, 1 = smoker
+        smoked_previously = dat_isba_add_visit_11$smoked_prev_num,
+        dust = dat_isba_add_visit_11$new_dust_pred)
+    
+
+    # make sure that gender, smoke, and SEG are factors. ------------------
+        jags_dat_prep_11$gender <- factor(jags_dat_prep_11$gender)
+        jags_dat_prep_11$smoked_previously <- factor(
+            jags_dat_prep_11$smoked_previously
+            )
+
+    # reset ADMIN to the base level ------------------------------------
+        jags_dat_prep_11$SEG <- factor(
+            jags_dat_prep_11$SEG,
+            levels = c(7, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13)
+            )
+
+    # how many observations? -------------------------------------------------
+    jags_dat_prep_11$n_obs <- length(jags_dat_prep_11$y)
+
+    # how many patients? ---------------------------------------------------
+    jags_dat_prep_11$n_patients <- n_distinct(jags_dat_prep_11$ID)
+
+```
+
+
+
+```{r prep-data-for-jags-fev1-2015}
+
+# data munging in prep for JAGS ---------------------------------------------
+
+    # put the data in a list for formatting with JAGS ------------------------
+
+    jags_dat_prep_15 <- list(
+        y = dat_isba_add_visit_15[[params$outcome]],
+        ID = dat_isba_add_visit_15$ID,
+        # change to days, for clarity
+        x = dat_isba_add_visit_15$days_since_arrival,
+        SEG = dat_isba_add_visit_15$seg_number,
+        gender = ifelse(dat_isba_add_visit_15$sex == "female",
+                        # to make male the base
+                        yes = 1, # female
+                        no = 0), # male
+        smoked_previously = dat_isba_add_visit_15$smoked_prev_num,
+        dust = dat_isba_add_visit_15$new_dust_pred)
+    
+
+    # make sure that gender, smoke, and SEG are factors. ------------------
+        jags_dat_prep_15$gender <- factor(jags_dat_prep_15$gender)
+        jags_dat_prep_15$smoked_previously <- factor(
+            jags_dat_prep_15$smoked_previously
+            )
+
+    # reset ADMIN to the base level ------------------------------------
+        jags_dat_prep_15$SEG <- factor(
+            jags_dat_prep_15$SEG,
+            # remove SEG13
+            levels = c(7, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12)
+            )
+
+    # how many observations? -------------------------------------------------
+    jags_dat_prep_15$n_obs <- length(jags_dat_prep_15$y)
+
+    # how many patients? ---------------------------------------------------
+    jags_dat_prep_15$n_patients <- n_distinct(jags_dat_prep_15$ID)
+
+```
+
+```{r prep-final-for-jags-2011}
+
+# use `model.matrix` to specify dummy indicator variables for factors -------
+# omit the intercept (-1), as the model hierarchy now specifies this
+# omit the effect of days (x), as this is also specified
+# try and remove the intercept and add back in the number of
+      X_11 <- (model.matrix( ~ gender + smoked_previously + dust + SEG -1,
+                    jags_dat_prep_11))
+
+# get rid of the extra column for gender, so we now have the effect of being a male, rather than two columns
+      X_11 <- X_11[,-1]
+
+# make the JAGS data
+    jags_dat_model_11 <- with(jags_dat_prep_11,
+                                list(y = y,
+                                     ID = ID,
+                                     x = x))
+
+# set parameters
+    # observations
+        jags_dat_model_11$n_obs <- length(jags_dat_model_11$y)
+    # number of patients
+        jags_dat_model_11$n_patients <- n_distinct(jags_dat_model_11$ID)
+    # The model matrix
+        jags_dat_model_11$X = X_11
+    # the number of parameters
+        jags_dat_model_11$np = dim(X_11)[2]
+
+```
+
+
+
+```{r prep-final-for-jags-2015}
+
+# omit the intercept (-1), as the model hierarchy now specifies this
+# omit the effect of days (x), as this is also specified
+      X_15 <- (model.matrix( ~ gender + smoked_previously + dust + SEG -1,
+                    jags_dat_prep_15))
+
+# get rid of the extra column for gender, so we now have the effect of being a male, rather than two columns
+      X_15 <- X_15[,-1]
+
+# make the JAGS data
+    jags_dat_model_15 <- with(jags_dat_prep_15,
+                                list(y = y,
+                                     ID = ID,
+                                     x = x))
+
+# set parameters
+    # observations
+        jags_dat_model_15$n_obs <- length(jags_dat_model_15$y)
+    # number of patients
+        jags_dat_model_15$n_patients <- n_distinct(jags_dat_model_15$ID)
+    # The model matrix
+        jags_dat_model_15$X = X_15
+    # the number of parameters
+        jags_dat_model_15$np = dim(X_15)[2]
+
+```
+
+
+```{r change-output}
+# use_data
+if(use_data == 2011){
+    dat_isba <- dat_isba_11
+    dat_isba_add_visit <- dat_isba_add_visit_11
+    jags_dat_prep <- jags_dat_prep_11
+    jags_dat_model <- jags_dat_model_11
+    rows_forecasted <- rows_forecasted_11
+} else if(use_data == 2015){
+    dat_isba <- dat_isba_15
+    dat_isba_add_visit <- dat_isba_add_visit_15
+    jags_dat_prep <- jags_dat_prep_15
+    jags_dat_model <- jags_dat_model_15
+    rows_forecasted <- rows_forecasted_15
+}
+
+```
+
+
+```{r create-directories}
+
+# create the directories ----
+# create the temporary directory
+dir.create(sprintf("%s/analysis/outputs", analysis_path), showWarnings = FALSE)
+dir.create(sprintf("%s/analysis/outputs/01_tidy_output", analysis_path), showWarnings = FALSE)
+
+# create the directory for the outcome
+dir.create(sprintf("%s/analysis/outputs/01_tidy_output/output_%s",
+                   analysis_path,
+                   params$outcome),
+           showWarnings = FALSE)
+
+
+```
+
+
+```{r save-output}
+
+# save data frames ----------------------------
+library(feather)
+
+
+feather::write_feather(dat_isba,
+sprintf("%s/analysis/outputs/01_tidy_output/output_%s/dat_isba.feather",
+                      analysis_path,
+                      params$outcome))
+
+feather::write_feather(dat_isba_add_visit,
+sprintf("%s/analysis/outputs/01_tidy_output/output_%s/dat_isba_add_visit.feather",
+            analysis_path,
+            params$outcome))
+
+# save lists ----------------------------------
+
+saveRDS(jags_dat_prep, 
+        sprintf("%s/analysis/outputs/01_tidy_output/output_%s/jags_dat_prep.rds",
+                analysis_path,
+                params$outcome),
+        compress = FALSE)
+
+saveRDS(jags_dat_model,
+        sprintf("%s/analysis/outputs/01_tidy_output/output_%s/jags_dat_model.rds",
+                analysis_path,
+                params$outcome),
+        compress = FALSE)
+
+saveRDS(rows_forecasted,
+sprintf("%s/analysis/outputs/01_tidy_output/output_%s/rows_forecasted.rds",
+            analysis_path,
+            params$outcome),
+        compress = FALSE)
+
+```
+

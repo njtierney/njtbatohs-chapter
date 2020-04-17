@@ -1,0 +1,265 @@
+---
+title: "post_process"
+author: "Nicholas Tierney"
+date: "`r format(Sys.time(), '%x at %H:%M:%S %Z')`"
+output: html_document
+params:
+    outcome: "dias"
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(message = FALSE,
+                      warning = FALSE,
+                      echo = FALSE,
+                      cache = TRUE)
+
+
+analysis_path <- rprojroot::find_package_root_file() 
+knitr::opts_knit$set(analysis_path)
+
+```
+
+```{r load-libraries, include = FALSE}
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(rjags)
+library(readr)
+library(readxl)
+library(lubridate)
+library(data.table)
+
+```
+
+Get all of the inputs from the previous Rmd
+
+How long does it take to retrieve the data?
+
+```{r retrieve-data, cache.lazy=FALSE}
+
+# get RDS ---------------------------------------------------------------------
+system.time(
+    jags_model_fit <-
+    readRDS(
+        sprintf("%s/analysis/outputs/02_fit_output/output_%s/jags_model_fit.rds",
+                analysis_path,
+                params$outcome))
+)
+
+system.time(
+    rows_forecasted <- 
+    readRDS(sprintf("%s/analysis/outputs/01_tidy_output/output_%s/rows_forecasted.rds",
+                    analysis_path,
+                    params$outcome))
+)
+```
+
+```{r load-dsmcmc-mcmc_to_dt}
+# this function is being loaded here to avoid having to install the package.
+#' mcmc_to_dt
+#'
+#' use data.table to return a tidy dataframe from an "mcmc.list" object
+#'
+#' @param mcmc_object an object of class "mcmc.list", as you would find with fitting a model using `jags.model()`, and `coda.samples`
+#'
+#' @return a data.table dataframe
+#' @export
+#'
+  mcmc_to_dt <- function(mcmc_object){
+
+  # how many chains?
+  n_chain <- length(mcmc_object)
+
+  # make a box to put the results in
+  dt_box <- vector("list", n_chain)
+
+  for (c in 1:n_chain) {
+
+      # get the mcmc object
+      mcmc_chain_c <- mcmc_object[c][[1]]
+
+      # how many iterations?
+      iterations <- 1:dim(mcmc_chain_c)[1]
+
+      mcmc_dt <- data.table::data.table(Iteration = iterations,
+                                        as.matrix(unclass(mcmc_chain_c)),
+                                        check.names = FALSE,
+                            # specify a new column for the chain number
+                                        chain = c)
+
+      # gather the columns so we end up with a column of
+      dt_melt <- data.table::melt.data.table(data = mcmc_dt,
+                                             id.vars = c("Iteration",
+                                                         "chain"))
+
+      # reset the names
+      data.table::setnames(dt_melt, c("iteration",
+                                      "chain",
+                                      "parameter",
+                                      "value"))
+
+      # change the order of the columns
+      data.table::setcolorder(dt_melt, c("iteration",
+                                         "chain",
+                                         "parameter",
+                                         "value"))
+
+      # arrange the row order
+      data.table::setorder(dt_melt,
+                           parameter,
+                           chain,
+                           iteration)
+
+      dt_box[[c]] <- dt_melt
+
+  } # end loop
+
+  # bind the loop together
+  dt_mcmc <- data.table::rbindlist(dt_box)
+
+  # return it
+  return(dt_mcmc)
+
+}
+```
+
+```{r dt-tidy-mcmc-outcomes, cache.lazy = FALSE}
+
+if (params$outcome == "fev1_perc"){
+
+    system.time(
+jags_model_dt <- mcmc_to_dt(jags_model_fit) %>%
+    .[ , param_num := readr::parse_number(parameter)] %>%
+    .[ , in_out := parameter %like% "^beta_all|^sigma_|^tau_"] %>%
+    .[ , forecasted := (param_num %in% rows_forecasted)] %>%
+    .[ , less_zero := (value < 0)] %>%
+    # Add a rows to find which values are greater than zero
+    .[ , greater_zero := (value > 0)] %>%
+    # How many samples are in the "chronic disease phase" 
+    # for FEV1 that is samples <= 70
+    .[ , chronic_disease := (value <= 70)]
+)
+    
+} else if (params$outcome == "bmi"){
+    
+    system.time(
+    jags_model_dt <- mcmc_to_dt(jags_model_fit) %>%
+    .[ , param_num := readr::parse_number(parameter)] %>%
+    .[ , in_out := parameter %like% "^beta_all|^sigma_|^tau_"] %>%
+    .[ , forecasted := (param_num %in% rows_forecasted)] %>%
+    .[ , less_zero := (value < 0)] %>%
+    # Add a rows to find which values are greater than zero
+    .[ , greater_zero := (value > 0)] %>%
+    # How many samples are in the "chronic disease phase" 
+    # for BMI that is samples >= 30
+    .[ , chronic_disease := (value >= 30)]
+    )
+    
+} else if (params$outcome == "sys"){
+    
+    system.time(
+    jags_model_dt <- mcmc_to_dt(jags_model_fit) %>%
+    .[ , param_num := readr::parse_number(parameter)] %>%
+    .[ , in_out := parameter %like% "^beta_all|^sigma_|^tau_"] %>%
+    .[ , forecasted := (param_num %in% rows_forecasted)] %>%
+    .[ , less_zero := (value < 0)] %>%
+    # Add a rows to find which values are greater than zero
+    .[ , greater_zero := (value > 0)] %>%
+    # How many samples are in the "chronic disease phase" 
+    # for Systolic that is samples >= 140
+    .[ , chronic_disease := (value >= 140)]
+    )
+    
+} else if (params$outcome == "dias"){
+    
+    system.time(
+    jags_model_dt <- mcmc_to_dt(jags_model_fit) %>%
+    .[ , param_num := readr::parse_number(parameter)] %>%
+    .[ , in_out := parameter %like% "^beta_all|^sigma_|^tau_"] %>%
+    .[ , forecasted := (param_num %in% rows_forecasted)] %>%
+    .[ , less_zero := (value < 0)] %>%
+    # Add a rows to find which values are greater than zero
+    .[ , greater_zero := (value > 0)] %>%
+    # How many samples are in the "chronic disease phase" 
+    # for diastolic that is samples >= 90
+    .[ , chronic_disease := (value >= 90)]
+    )
+    
+}
+```
+
+
+```{r dt-summary-tidymcmc, include = FALSE, cache.lazy = FALSE}
+system.time(
+jags_model_dt_summary <- jags_model_dt[ , .(mean = mean(value),
+                                            q_02.5 = quantile(value,
+                                                            probs = 0.025,
+                                                            type = 8),
+                                            q_10 = quantile(value,
+                                                            probs = 0.10,
+                                                            type = 8),
+                                            median = quantile(value,
+                                                            probs = 0.5,
+                                                            type = 8),
+                                            q_90 = quantile(value,
+                                                            probs = 0.9,
+                                                            type = 8),
+                                            q_975 = quantile(value,
+                                                            probs = 0.975,
+                                                            type = 8),
+                                            # probability of a parameter < 0
+                                            pr_less_zero = mean(less_zero),
+                                            # add a row to find which values > 0
+                                            pr_greater_zero = mean(greater_zero),
+                                            pr_chronic_disease = mean(chronic_disease),
+                                            forecasted = first(forecasted)),
+                                            # forecasted = forecasted),
+                                        by = parameter]
+)
+```
+
+```{r ditch-large-models}
+
+rm(jags_model_fit)
+gc()
+
+```
+
+```{r create-directories}
+
+# create the directories ----
+# create the temporary directory
+dir.create(sprintf("%s/analysis/outputs/03_post_process_output", analysis_path), showWarnings = FALSE)
+
+# create the directory for the outcome
+dir.create(sprintf("%s/analysis/outputs/03_post_process_output/output_%s",
+                   analysis_path,
+                   params$outcome),
+           showWarnings = FALSE)
+
+
+```
+
+
+```{r save-output, echo = TRUE, cache.lazy = FALSE}
+
+system.time(
+fwrite(jags_model_dt,
+       file = sprintf("%s/analysis/outputs/03_post_process_output/output_%s/jags_model_dt.csv",
+                           analysis_path,
+                           params$outcome))
+)
+
+# note - feather is fast to write, but slow to read.
+
+system.time(
+fwrite(jags_model_dt_summary,
+       file = sprintf("%s/analysis/outputs/03_post_process_output/output_%s/jags_model_dt_summary.csv",
+                           analysis_path,
+                           params$outcome))
+)
+
+```
+

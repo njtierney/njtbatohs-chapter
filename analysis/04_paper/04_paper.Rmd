@@ -1,0 +1,1666 @@
+---
+title: "Bayesian modelling to assist inference on health outcomes in Occupational Health Surveillance"
+author: Nicholas J Tierney(1,2,3), Samuel Clifford(1,2), Christopher C Drovandi(1,2),
+  Kerrie L Mengersen(1,2)
+output:
+  pdf_document:
+    includes:
+      in_header: premble.tex
+    keep_tex: yes
+  html_document:
+    keep_md: yes
+  word_document:
+    reference_docx: paper-template.docx
+params:
+  data: 2015
+  n_iterations_adapt: 1000
+  n_iterations_burnin: 10000
+  n_iterations_model: 20000
+  n_thin: 1
+bibliography: paper.bib
+csl: vancouver.csl
+---
+
+Affiliations:
+
+1. ARC Centre of Excellence for Mathematical and Statistical Frontiers 
+
+2. School of Mathematical Sciences, Queensland University of Technology, 
+Brisbane, Queensland, Australia 
+
+3. Department of Econometrics and Business Statistics, Monash University, 
+Melbourne, Victoria, Australia
+
+
+**Corresponding Author: Nicholas J Tierney**
+
+**Corresponding Author Address: Department of Econometrics and Business Statistics E774, Menzies Building Monash University, Clayton, Victoria, Australia, 3800**
+
+**Corresponding Author email: nicholas.tierney@monash.edu**
+
+**Corresponding Author phone: 03 9905 9352**
+
+
+```{r setup, include = FALSE}
+
+knitr::opts_chunk$set(message = FALSE,
+                      warning = FALSE,
+                      echo = FALSE,
+                      cache = TRUE,
+                      dev = c("png"),
+                      autodep = TRUE,
+                      dpi = 600)
+
+# use rproj root to find the rproject root file
+knitr::opts_knit$set(rprojroot::find_rstudio_root_file())
+
+analysis_path <- rprojroot::find_rstudio_root_file()
+```
+
+```{r load-libraries, include = FALSE}
+library(dplyr)
+library(tidyr)
+library(forcats)
+library(hms)
+library(modelr)
+library(stringr)
+library(lubridate)
+library(purrr)
+library(rjags)
+library(ggmcmc)
+library(ggthemes)
+library(readr)
+library(readxl)
+library(lubridate)
+library(tibble)
+library(data.table)
+library(broom)
+```
+
+
+```{r source-plotting-functions}
+source(sprintf("%s/R/create_obs_pred_summary.R", analysis_path))
+source(sprintf("%s/R/plot_fig_four.R", analysis_path))
+```
+
+```{r read-03-post-process-output-fev1, include = FALSE}
+
+system.time(
+jags_model_dt_summary_fev1 <- fread(
+sprintf("%s/analysis/outputs/03_post_process_output/output_fev1_perc/jags_model_dt_summary.csv",
+         analysis_path)) %>%
+    mutate(model_outcome = "fev1") %>%
+    as.data.table()
+)
+
+system.time(
+dat_isba_fev1 <- feather::read_feather(
+sprintf("%s/analysis/outputs/01_tidy_output/output_fev1_perc/dat_isba.feather",
+         analysis_path)
+)
+)
+
+system.time(
+jags_dat_model_fev1 <- readRDS(
+sprintf("%s/analysis/outputs/01_tidy_output/output_fev1_perc/jags_dat_model.rds",
+         analysis_path)
+)
+)
+
+system.time(
+jags_dat_prep_fev1 <- readRDS(
+    sprintf("%s/analysis/outputs/01_tidy_output/output_fev1_perc/jags_dat_prep.rds",
+         analysis_path)
+    )
+)
+
+```
+
+```{r read-03-post-process-output-bmi, include = FALSE}
+system.time(
+jags_model_dt_summary_bmi <- fread(
+sprintf("%s/analysis/outputs/03_post_process_output/output_bmi/jags_model_dt_summary.csv",
+         analysis_path)
+) %>%
+    mutate(model_outcome = "bmi") %>%
+    as.data.table()
+)
+
+system.time(
+dat_isba_bmi <- feather::read_feather(
+sprintf("%s/analysis/outputs/01_tidy_output/output_bmi/dat_isba.feather",
+         analysis_path)
+)
+)
+
+system.time(
+jags_dat_model_bmi <- readRDS(
+sprintf("%s/analysis/outputs/01_tidy_output/output_bmi/jags_dat_model.rds",
+         analysis_path)
+)
+)
+
+system.time(
+jags_dat_prep_bmi <- readRDS(
+    sprintf("%s/analysis/outputs/01_tidy_output/output_bmi/jags_dat_prep.rds",
+         analysis_path)
+    )
+)
+
+
+```
+
+```{r read-03-post-process-output-sys, include = FALSE}
+
+system.time(
+jags_model_dt_summary_sys <- fread(
+sprintf("%s/analysis/outputs/03_post_process_output/output_sys/jags_model_dt_summary.csv",
+         analysis_path)
+) %>%
+    mutate(model_outcome = "sys") %>%
+    as.data.table()
+)
+
+system.time(
+dat_isba_sys <- feather::read_feather(
+sprintf("%s/analysis/outputs/01_tidy_output/output_sys/dat_isba.feather",
+         analysis_path)
+)
+)
+
+system.time(
+jags_dat_model_sys <- readRDS(
+sprintf("%s/analysis/outputs/01_tidy_output/output_sys/jags_dat_model.rds",
+         analysis_path)
+)
+)
+
+system.time(
+jags_dat_prep_sys <- readRDS(
+    sprintf("%s/analysis/outputs/01_tidy_output/output_sys/jags_dat_prep.rds",
+         analysis_path)
+    )
+)
+
+
+```
+
+```{r read-03-post-process-output-dias, include = FALSE}
+system.time(
+jags_model_dt_summary_dias <- fread(
+sprintf("%s/analysis/outputs/03_post_process_output/output_dias/jags_model_dt_summary.csv",
+         analysis_path)
+) %>%
+    mutate(model_outcome = "dias") %>%
+    as.data.table()
+)
+
+system.time(
+dat_isba_dias <- feather::read_feather(
+sprintf("%s/analysis/outputs/01_tidy_output/output_dias/dat_isba.feather",
+         analysis_path)
+)
+)
+
+system.time(
+jags_dat_model_dias <- readRDS(
+sprintf("%s/analysis/outputs/01_tidy_output/output_dias/jags_dat_model.rds",
+         analysis_path)
+)
+)
+
+system.time(
+jags_dat_prep_dias <- readRDS(
+    sprintf("%s/analysis/outputs/01_tidy_output/output_dias/jags_dat_prep.rds",
+         analysis_path)
+    )
+)
+
+
+```
+
+
+## Abstract
+
+**Objectives**
+
+Occupational Health Surveillance (OHS) facilitates early detection of disease
+and dangerous exposures in the workplace. Current OHS analyses ignore important
+workplace structures and repeated measurements. There is
+a need to provide systematic analyses of medical data that incorporate the data
+structure. Although multilevel statistical models may account for features of
+OHS data, current applications in occupational health medicine are often not
+appropriate for OHS. Additionally, typical OHS data has not been analysed in a
+Bayesian framework, which allows for calculation of probabilities of potential
+events and outcomes. This paper's objective is to illustrate the use of
+Bayesian modeling of OHS. Three analytic aims are addressed: (1) Identify patterns and changes in health outcomes; (2) Explore the effects of a particular risk factor, smoking and industrial exposures over time for individuals and worker groups; (3) identify risk of chronic conditions in individuals.
+
+**Method**
+
+A Bayesian hierarchical model was developed to provide individual and group
+level estimates and inferences for health outcomes, FEV1%, BMI, and
+Diastolic and Systolic blood pressure.
+
+**Results**
+
+We identified individuals with the greatest degree of change over time for each
+outcome, and demonstrated how to flag individuals with substantive negative
+health outcome change. We also assigned probabilities of individuals moving into "at risk" health categories one year from their last visit.
+
+**Conclusion**
+
+Bayesian models can account for features typically encountered in OHS data,
+such as individual repeated measurements and group structures. We
+describe one way to fit these data and obtain informative estimates and
+predictions of employee health.
+
+## Summary
+
+**Strengths and Limitations of the study**
+
+- Strength: This is the first application of Bayesian methods to typical data
+found in occupational health surveillance.
+
+- Strength: The methods used account for important features
+of data such as multiple measurements for individuals, and the group structure
+of exposure groups in the workplace.
+
+- Strength: The model allows for groups and individuals to be flagged as "at risk", enabling proactive action on individual health.
+
+- Strength: The definition of a Bayesian credible interval as a range of
+probable values for a parameter makes it easier to communicate model inferences.
+
+- Strength: The model provides probabilities of interest directly, conditional on the data, which is a useful complement to credible intervals that makes effects and uncertainty simpler and easier to communicate to health practitioners.
+
+- Limitation: No account was taken of the healthy worker effect, so whilst the focus of the paper is on employees rather than the
+general population, the analysis may be biased if healthier employees remain
+longer in the industry. 
+
+- Limitation: The model used vague priors, and so future work could explore
+the use of more informative priors, based on, for example, previous data collected in similar fields. 
+
+## Data Sharing
+
+For reasons of employee confidentiality and industry sensitivity, the dataset
+used in the case study is not available for sharing. However, the seminal
+features of the dataset are well described in the paper.
+
+# Contributors 
+
+NJT conducted literature review, statistical analysis, created visualisations, and wrote the first draft. SC provided critical feedback, assisted in developing the statistical model and in presenting results. CCD provided assistance in developing the statistical model and in critical feedback of the paper. KLM provided initial description of the model, assisted in developing the code, and provided critical feedback of the paper and presentation of results. All authors approved the version of the paper for publishing, and agreed to respond to questions that may arise regarding integrity of the work.
+
+# Funding 
+
+This research was jointly funded by an Australian Postgraduate Award (APA), the Australian Technology Network Industry Doctoral Training Centre (IDTC), the Australian Research Council, and the ARC Centre of Excellence for Mathematical and Statistical Frontiers. CCD was supported by an Australian Research Council’s Discovery Early Career Researcher Award funding scheme (DE160100741).
+
+# Competing interests 
+
+None declared.
+
+# Ethics approval 
+
+The QUT University Human Research Ethics Committee.
+
+# Introduction
+
+Occupational Health Surveillance (OHS) is the systematic collection, analysis,
+and dissemination of employee exposure and health data to facilitate early
+detection of disease and dangerous exposures in the workplace [@schulte2008].
+Australian employers have a responsibility to identify, assess, and control
+risks arising from workplace hazards [@sw_oz; @Firth2006]. There is a rigorous
+methodology for OHS data collection, but a surprising lack of agreement about
+analysis of these data [@lewis2013]. Indeed, industry OHS data collection is
+often targeted for managing risk and implementing engineering controls.
+Consequently, many of the analyses conducted in industry focus on the likelihood
+of exposure rather than the impact of these risk factors on health. Moreover,
+current practices may ignore important data structures such as repeated
+measurements and workplace structures. This results in inferences not being
+applicable for individuals over time, or for groups with similar exposures
+within the workplace.
+
+There is a need to provide systematic analyses of medical data that incorporate
+workplace structure, relevant to risk factors. An example of such a workplace
+structure is segmentation of the workplace into similar exposure groups (e.g.,
+as in @Banerjee2014). Moreover, such analyses need to incorporate typical
+features of OHS data, in particular where individuals have multiple health
+measurements, or single repeated measurements over time, or missing data. These
+analyses should provide both individual and group health predictions, and should
+improve the understanding of exposure effects on the workplace population as a
+whole, as well as similar exposure groups and individuals. Such analyses
+could flag individuals and groups for further health monitoring. The absence of
+such analyses in industry means that chronic disease and dangerous work
+environments may go unidentified and that health funding is not optimally or
+effectively targeted.
+
+These features of OHS data described above can be accounted for with multilevel
+statistical models. These are in wide use in epidemiology [@lynch2005; @duncan1998], and have been used in occupational health medicine to evaluate
+decline in lung function for ceramic fibre workers [@McKay2011], assess impacts
+of asbestos [@Algranti2013], measure decline from cystic fibrosis
+[@Szczesniak2013] and model leptospirosis in abattoir employees [@Cook2016].
+
+However, applications of multilevel models in occupational health medicine do
+not quite mimic the analyses conducted in standard industry environments, as
+they might ignore individuals with only one measurement, population minority
+groups, or workplace structures [@McKay2011; @Algranti2013]. This is likely due
+to the fact that the goal of these papers is often to demonstrate the use of a
+new method [@deVocht2009; McKay2011; @Algranti2013; @Szczesniak2013], or
+discover new health risk factors or exposures [@Bakke1991; @Gibbs2007; @Hellgren2002; @Radon2008; @Olsson2010].
+
+In contrast, the goal of OHS analysis is to provide individual predictions for
+health, understand the effect of exposures on groups, and monitor exposures and
+health over time, so that individuals and groups at risk of some disease can be
+flagged for further health monitoring. Thus, ignoring cases with only one
+medical visit or analysing only subsets of the population for reasons such as
+sufficient sample size, can increase bias and/or variance of estimates.
+
+Bayesian models provide a pragmatic framework for this research problem, as they
+provide simple and effective ways of analysing small effects, and provide a rich
+set of results that can be interpreted with probabilistic statements. Bayesian
+methodology also allows for direct comparison between groups and individuals,
+and provides probabilities on potential events and outcomes.
+
+Bayesian techniques have been recently applied in occupational health, with
+@Banerjee2014 demonstrating the use of hierarchical models to combine
+monitoring data and professional judgement from occupational hygienists to
+facilitate decision making. Bayesian hierarchical models have also been applied
+to quantify chemical exposure variation in human populations [@Shao2016], and
+to combine two data sources from animal studies and human
+industrial studies to create informative priors to estimate human lung function
+changes [@Bartell2017].
+
+Industry data used in the literature typically consist of longitudinal data
+collected from employees in a particular industry, or set of industries. These
+data are used to evaluate the effect of the working conditions, such as long
+hours with no sleep [@Sieber2014; @Fekedulegn2016], metal smelting, and other
+exposures [@deVocht2009; @Olsson2010; @McKay2011; @Algranti2013; @Szczesniak2013; @Cook2016]. Other OHS studies focus on small populations, using
+experiments to evaluate effects of increasing some exposure on health
+[@Hendrick1988; @Stenton1990], or larger cross-sectional studies using registry
+data, cohort studies, or surveys to evaluate the effect of an environmental
+exposure on diseases such as rhinitis or cystic fibrosis [@Szczesniak2013; @Radon2008].
+
+Notwithstanding these studies, there are no examples of Bayesian hierarchical
+modelling and analysis of typical OHS data with
+applications in an industry context. This paper analyses OHS data from selected
+industrial sites around Australia to identify risk factors for health outcomes.
+The multilevel model adopted is a Bayesian hierarchical model providing
+individual and group level estimates and inferences.
+
+The aims of the analysis are three-fold, and are focused on the following
+health outcomes: lung function (as a percentage of predicted Forced Expiratory
+Volume in 1 second (FEV~1~, FEV~1~\%), Body Mass Index (BMI), and systolic
+and diastolic blood pressure. These health outcomes were selected as they are
+clinically substantive in the case study population and are well known in OHS.
+The first analytic aim is to identify patterns and changes in health outcomes. The second
+aim is to explore the effects of a particular risk factor: smoking and
+industrial exposures over time for individuals and worker groups. The third
+aim is to identify risk of chronic conditions (such as obesity, hypertension, and
+obstructive / restrictive lung disease) in individuals.
+
+# Method
+
+**Case Study Data**
+
+The case study considered in this paper is typical of many large companies that 
+are involved in a range of activities, such as construction, mining, manufacturing and agriculture. For reasons of confidentiality, the particular industry and associated sites are not named here. The data are comprised of over 3000 employee medical records from nearly 2000 individuals located at a number of sites. Each observation is a medical visit, and while most employees have one or two visits, some have over ten visits over a 10 year period. Employees are typically grouped by their workplace exposure; for example,
+Administration employees are less likely to be
+exposed to environmental factors such as dust or noise, compared to maintenance exposure groups. In this way, Administration provides a useful control group to compare to the other exposure groups. Employees may change positions within the company over their career and thus may also change their exposure group. The pattern of measurements over time for
+individuals are illustrated in Figure 1, which displays individual measurements
+of lung function (FEV1\%) over visits for selected exposure groups.
+
+```{r fig-one, fig.width = 8, fig.height = 5, fig.cap = "Individual employee lung function (FEV1%) over their medical visit number (1, up to 10), for each exposure group. A sample of 50% of employees is used to reduce overplotting.  Individuals are linked by a line between observations. A point on the 2nd or later visit which is not joined to previous points by a line indicates individuals who have changed exposure group. Broken lines and individual floating points without lines indicate where individuals have changed exposure group. Note that the number of days between visits varies by individual and exposure group."}
+
+# choose a random selection of IDs
+set.seed(2017-11-30)
+sample_id <- sample(unique(dat_isba_fev1$ID),900)
+
+dat_isba_fev1 %>%
+    filter(ID %in% sample_id) %>%
+    filter(seg_label != "unknown") %>%
+    ggplot(data = .,
+           aes(x = lf_visit,
+               y = fev1_perc,
+               group = uin)) +
+    geom_line(alpha = 0.8,
+              colour = "#003366") +
+    geom_point(alpha = 0.8,
+               colour = "orange2") +
+    facet_wrap(~ seg_label,
+               ncol = 3,
+               labeller = seg_labeller) +
+    theme(legend.position = "none",
+          strip.background = element_rect(fill="#003366"),
+          strip.text.x = element_text(colour = "white"),
+          axis.text.x = element_text(size = 16,
+                                     colour = "#003366"),
+          axis.text.y = element_text(size = 16,
+                                     colour = "#003366"),
+          axis.title.y = element_text(size = 16,
+                                      colour = "#003366")) +
+    labs(x = "Visit #",
+         y = "FEV1 %") + 
+    theme_hc()
+
+
+dat_days_sum <-    
+dat_isba_bmi %>%
+    select(days_since_arrival) %>%
+    filter(days_since_arrival != 0) %>%
+    summarise(median = median(days_since_arrival),
+              lower_025 = quantile(days_since_arrival, probs = 0.025),
+               upper_975 = quantile(days_since_arrival, probs = 0.975)) %>%
+    round()
+
+```
+
+The frequency of medical visits changes for each exposure group, as
+certain exposure groups require more frequent medical examinations to
+ensure that they are fit for work. The times between visits for each
+worker were not equally spaced, with median number of days since first visit
+being `r dat_days_sum$median[1]` (IQR = `r dat_days_sum$lower_025[1]` -
+`r dat_days_sum$upper_975[1]`), or `r round(dat_days_sum$median[1]/365,1)` years (IQR = `r round(dat_days_sum$lower_025[1]/365,1)` -
+`r round(dat_days_sum$upper_975[1]/365,1)` years). Gender (male or female) and smoking status (ever
+smoker or never smoker) were also recorded.  Dust data were not recorded for some dates and
+were interpolated using a loess model [@steinle2015] fitted for each exposure
+group, so that the values corresponded to medical examination dates. Interpolated values should be treated with care, and explored with visual and numerical summaries.
+
+**Ethics**
+
+The Queensland University of Technology Human Research Ethics Committee assessed
+that this research met the conditions for exemption from HREC review and
+approval in accordance with section 5.1.22 of the Australian National Statement
+on Ethical Conduct in Human Research. 
+
+**Patient and Public Involvement**
+
+The development of the research questions and outcomes were informed by discussion with health practitioners who helped collect the data. The patients were not involved in the results, design, or recruitment. The paper will be shared with the medical practitioners for their use in future designs. We thank the health practitioners and patients involved in the data collection.
+
+**Modelling**
+
+We construct four multilevel Bayesian hierarchical models. Each model predicts
+one of the four outcomes: lung function (FEV1\%), Body Mass Index (BMI), systolic
+blood pressure, and diastolic blood pressure. 
+
+Let $Y_{ij}$ be the $i^{th}$ individual's $j^{th}$ health observation, at a time
+day$_{ij}$ after their first visit. We assume that $Y_{ij}$ follows a normal distribution with mean $\mu_{ij}$ and variance $\sigma_y^2$. Let $\beta_{0i}$ 
+and $\beta_{di}$ be respectively the individual intercept and individual health trend coefficient 
+associated with the $j^{th}$ day for the $i^{th}$ person; these individual parameters are centered
+around an overall intercept $\beta_{0c}$ and an overall slope $\beta_{dc}$, 
+the effect of the number of days since arriving at the workplace. Thus
+$\beta_{di}$ is the linear
+trend over time for the health characteristics of interest for the $i^{th}$ individual, over and above the
+overall population effect. Let $\beta_{g}$ be the effect of being female (compared to being male); let $\beta_{s}$ be the effect of being a smoker (compared to a never smoker), and let $\sum_{k = 1}^{n_{\mathrm{exposure}}-1} \beta_k I(\mathrm{exposure}_{ij} = k)$ be the effect of a workplace exposure, where $I(.)$ indicates whether an individual $i$ at a visit $j$ is in exposure group $k$, with the baseline exposure group set to Administration. Thus the model for a particular health outcome is represented as:
+
+$$
+Y_{ij} \sim \mathcal{N}(\mu_{ij},\sigma^2_y)
+$$
+
+with 
+$$
+\mu_{ij}=\beta_{0i}+\beta_{di}\mathrm{day}_{ij}+\beta_g\mathrm{gender}_{ij}+\beta_{s}\mathrm{smoke}_{ij}+\beta_p\mathrm{dust}_{ij}+\sum_{k=1}^{n_{\mathrm{exposure}}-1}{\beta_k }I(\mathrm{exposure_{ij}}=k) 
+$$
+
+$$
+\beta_{0i} \sim N(\beta_{0c},\sigma_{0}^2)
+$$
+
+$$
+\beta_{di} \sim N(\beta_{dc},\sigma_{d}^2)
+$$
+
+
+for $i=1 \ldots n_{I}$, $j=1 \ldots n_{0i}$, $k=1 \ldots,n_E$, where $n_I$ is the total number of individuals, $n_{0i}$ is the number of observations for each individual, and $n_E$ is the number of exposure groups.
+
+In the absence of other information, all of the regression coefficients were allocated independent normal priors with a mean of 0 and a variance of $D_1 = 10^3$.
+
+$$
+\beta_{0c},\beta_{dc},\beta_{di},\beta_g,\beta_s,\beta_p,\beta_k \sim N(0,D_1)
+$$
+
+Priors on $\sigma_{0},\sigma_y,\sigma_{d}$ were set to a uniform distribution
+with bounds of zero and $D2$, where $D_2=100$ for BMI and FEV~1~\%, and $D_2=50$ for Systolic and Diastolic blood pressure. $D_2$ is intended to better reflect the variation in BMI and FEV~1~% compared to blood pressure. Note also that we do not recommend automatically choosing set values for the uniform, but to instead choose sensible bounds based on the problem at hand.
+
+$$
+\sigma_{y},\sigma_0,\sigma_{d}, \sim \mathrm{Uniform}(0,D_2)
+$$
+
+Note also that the priors used for the $\beta$ terms are proper priors, which produce a proper posterior. In some cases improper priors such as an infinite uniform prior might be used, but these are sometimes not valid choices (See @Hobert1996 and @Rubio2018 for more details). It is worthwhile to consider the choice of prior for the variance terms. Although we have used inverse gamma and uniform priors, other weakly informative priors could be considered, such as a half-t-prior (represented as a half-Cauchy) [@Gelman2006]. It is important to not automatically choose uniform or half-t-priors, but to explore options during model building.
+
+Data processing and manipulation were implemented using the R statistical
+programming language [@rcore] and various R packages [@dplyr; @tidyr; @readxl;
+@purrr; @lubridate; @data.table]. To ensure reproducibility, the paper
+was written using rmarkdown and knitr [@rmarkdown; @knitr].  Potential outliers in the data were checked administratively and confirmed for biological plausibility in the context of the workforce under consideration. Given this, we elected to include them in the analyses. Moreover, the modelling goal is to identify those who are risk, so removing outliers seems counter to that goal. The model was run for 20,000 iterations (10,000
+burnin) using JAGS [@plummer2003; @rjags]. Thinning was applied to the analysis, removing every 20th value to assist in reducing autocorrelation and for computational storage. We note that thinning is not absolutely necessary in an analysis, and should be assessed case by case [@Link2012]. We note that other software such as STAN, WinBUGS or OpenBUGS, Nimble, and greta could also have been used [@rstan; @Lunn2000; @nimble; @greta]. The diagnostics for MCMC convergence were predominantly graphical and statistical [@Lunn2012; @ggmcmc]. Graphical evaluation included expert examination of posterior density plots, traceplots and autocorrelation plots of parameters. Statistical evaluation included calculation of the Geweke diagnostic and effective sample size. 
+
+Missing values were imputed from their respective posterior conditional
+distributions as part of the Bayesian analysis. Posterior estimates of each parameter, including mean, 95\% and 80\% credible intervals, and probability of being negative
+were calculated after burnin. An effect was nominated as substantive if
+the corresponding credible interval did not contain zero. 
+The probability of individual health outcomes reaching the threshold value of being a chronic condition was also calculated. Individuals were identified as being "at risk" if the corresponding estimates of the parameter for change over time, $\beta_{di}$, contained 0 in the 95\% credible intervals, and $\beta_{di}$ was far away from zero. For the purposes of exposition, individuals with 3 or more visits were selected as examples to explore further.
+
+Patterns and trends in health outcomes were examined by exploring individuals'
+change over time and identifying substantive effects, addressing analytic aim 1. The
+effects of smoking and industrial exposures over time for individuals and
+exposure groups were examined by evaluating substantive effects of smoking and
+dust for each outcome, and finding those exposure groups substantively different
+from the Administration population, addressing aim 2. To identify future risk
+of chronic conditions, one year forecasts for each individual and corresponding
+95\% credible intervals were calculated from the respective posterior predictive distribution, and the probability
+of having a chronic condition in one year was obtained, addressing aim 3. Model
+fit was evaluated by examining the proportion of observed values lying within
+the 95\% and 80\% posterior predictive intervals [@BDA3 chapter 6; @Besag1995].
+
+# Results
+
+```{r descriptive-stats}
+
+age_info_gender <- 
+dat_isba_bmi %>%
+    group_by(uin) %>%
+    mutate(max_vis = max(lf_visit)) %>%
+    ungroup() %>%
+    filter(max_vis == lf_visit) %>%
+    mutate(age =  as.numeric((date - dob)) / 365) %>%
+    group_by(sex) %>%
+    summarise(mean = mean(age),
+              sd = sd(age, na.rm = TRUE))
+
+age_info <- 
+dat_isba_bmi %>%
+    group_by(uin) %>%
+    mutate(max_vis = max(lf_visit)) %>%
+    ungroup() %>%
+    filter(max_vis == lf_visit) %>%
+    mutate(age =  as.numeric((date - dob)) / 365) %>%
+    summarise(mean = mean(age),
+              sd = sd(age))
+
+mean_age <- age_info$mean
+sd_age <- age_info$sd
+
+mean_age_female <- age_info_gender %>% filter(sex == "female") %>% .$mean
+mean_age_male <- age_info_gender %>% filter(sex == "male") %>% .$mean
+sd_age_female <- age_info_gender %>% filter(sex == "female") %>% .$sd
+sd_age_male <- age_info_gender %>% filter(sex == "male") %>% .$sd
+
+```
+
+
+**Demographics**
+
+In the case study dataset, the population was predominantly male (86\%), with the mean overall
+age being `r round(mean_age,2)` years. Males were older on average, but not significantly so, compared with females. For all exposure groups there were more males than females, except in the Administration exposure group. The proportion of individuals in selected exposure groups is shown below in Table 1.
+
+```{r new-table-of-segs, results = "asis"}
+
+new_exposure_group <- c("Administration",
+                        "Emergency",
+                        "Exterior Maintenance",
+                        "Technicians",
+                        "Technology",
+                        "Interior Maintenance",
+                        "Field Experts")
+
+table_one_percent_pop_in_exposure <- dat_isba_bmi %>%
+    count(seg_label) %>%
+    mutate(pct = round((n / sum(n))*100,2)) %>%
+    mutate(seg_label = my_seg_case_when(seg_label)) %>%
+    select(seg_label,
+           pct) %>%
+    filter(seg_label %in% new_exposure_group) %>%
+    arrange(-pct) %>%
+    mutate(pct = round(pct,1)) %>%
+    rename(`Exposure` = seg_label,
+           `% of Population` = pct) %>%
+    # pander::pandoc.table(caption = "Percent of the population in selected exposures")
+    knitr::kable(caption = "Percent of the population in selected exposures", )
+
+# table_one_percent_pop_in_exposure
+```
+|Exposure             | % of Population|
+|:--------------------|---------------:|
+|Technology           |            18 - 20|
+|Administration       |             8 - 10|
+|Interior Maintenance |             8 - 10|
+|Technicians          |             6 - 7|
+|Emergency            |             5 - 6|
+|Exterior Maintenance |             4 - 5|
+|Field Experts        |             2 - 3|
+
+
+Table: Percent of the population in selected exposures
+
+
+
+```{r test-table-fig-three, fig.out = "70%", fig.width = 10, fig.height = 10}
+  
+obs_pred_summary_fev1 <- create_obs_pred_summary(jags_model_dt_summary_fev1,
+                                                 jags_dat_model_fev1,
+                                                 jags_dat_prep_fev1) %>%
+                         mutate(model_outcome = "fev1")
+
+obs_pred_summary_bmi <- create_obs_pred_summary(jags_model_dt_summary_bmi,
+                                                 jags_dat_model_bmi,
+                                                 jags_dat_prep_bmi) %>%
+                         mutate(model_outcome = "bmi")
+
+obs_pred_summary_sys <- create_obs_pred_summary(jags_model_dt_summary_sys,
+                                                 jags_dat_model_sys,
+                                                 jags_dat_prep_sys) %>%
+                         mutate(model_outcome = "sys")
+
+obs_pred_summary_dias <- create_obs_pred_summary(jags_model_dt_summary_dias,
+                                                 jags_dat_model_dias,
+                                                 jags_dat_prep_dias) %>%
+                         mutate(model_outcome = "dias")
+
+obs_pred_summary_all <- bind_rows(obs_pred_summary_fev1,
+                                  obs_pred_summary_bmi,
+                                  obs_pred_summary_sys,
+                                  obs_pred_summary_dias)
+
+```
+
+```{r make-rss}
+
+model_rss <- obs_pred_summary_all %>%
+    filter(forecasted == FALSE) %>%
+    # group_by(model_outcome) %>%
+    mutate(resid = (outcome - pred_mean)^2) %>% 
+    group_by(model_outcome) %>%
+    summarise(RSS = sum(resid, na.rm = TRUE),
+              RMSE = sqrt(mean(resid^2, na.rm = TRUE))) %>% 
+    rename(Outcome = model_outcome)
+```
+
+```{r fig-two, fig.asp = NULL, fig.width = 10, fig.height = 10, fig.out = "50%", fig.cap = "Observed values for each health outcome plotted against the posterior mean values (point) with their respective 95\\% posterior predictive interval (lines). A line of perfect prediction is shown. The points and lines are shown in red to indicate when the 95\\% posterior predictive interval lies outside the line of perfect prediction"}
+
+fig_four_fev1 <- 
+create_obs_pred_summary(jags_model_dt_summary_fev1,
+                        jags_dat_model_fev1,
+                        jags_dat_prep_fev1) %>%
+    plot_fig_four() +
+    xlim(20, 180) + 
+    ylim(20, 180) +
+    labs(title = "FEV1%",
+         y = "Posterior Values") +
+    theme(plot.title=element_text(size = 18))
+
+fig_four_bmi <- 
+create_obs_pred_summary(jags_model_dt_summary_bmi,
+                        jags_dat_model_bmi,
+                        jags_dat_prep_bmi) %>%
+    plot_fig_four() +
+    xlim(10, 110) + 
+    ylim(10, 110) +
+    labs(title = "BMI",
+         y = "Posterior Values") +
+    theme(plot.title=element_text(size = 18))
+
+fig_four_sys <- 
+create_obs_pred_summary(jags_model_dt_summary_sys,
+                        jags_dat_model_sys,
+                        jags_dat_prep_sys) %>%
+    plot_fig_four() +
+    xlim(60, 250) + 
+    ylim(60, 250) +
+    labs(title = "Systolic",
+         y = "Posterior Values") +
+    theme(plot.title=element_text(size = 18))
+
+fig_four_dias <- 
+create_obs_pred_summary(jags_model_dt_summary_dias,
+                        jags_dat_model_dias,
+                        jags_dat_prep_dias) %>%
+    plot_fig_four() +
+    xlim(20, 140) + 
+    ylim(20, 140) +
+    labs(title = "Diastolic",
+         y = "Posterior Values") +
+    theme(plot.title=element_text(size = 18))
+
+
+gridExtra::grid.arrange(fig_four_fev1,
+                        fig_four_bmi,
+                        fig_four_sys,
+                        fig_four_dias)
+
+# figure 2 here used to be figure 5. Just for reference
+
+```
+
+
+**Model Fit**
+
+Figure 2 shows the posterior predictions for each outcome plotted on the y axis
+against the observed values on the x axis. The points represent the observed
+values and the corresponding posterior means with vertical lines representing
+the respective 95\% posterior predictive intervals. A line of perfect prediction
+runs from the bottom left to the top right corner. The points and lines are
+shown in red to indicate when the observed value lies outside of the 95\%
+posterior predictive interval.
+
+Model fit was assessed by visual inspection of Figure 2, and by assessing the percentage of observed values that lie within nominated posterior predictive intervals (Table 2). The models for BMI and FEV1\% had very high proportions of observed values in the 95\% intervals and 80\% intervals, indicating reasonable model fit.
+
+```{r table-1-part-1}
+ # if(interval == "95%"){
+
+table_1_part_1 <- obs_pred_summary_all %>%
+    group_by(model_outcome) %>%
+    # obs_pred_summary %>%
+        filter(forecasted == FALSE) %>%
+        count(in_range_95) %>%
+        na.omit() %>%
+        mutate(pct = round((n / sum(n)), 4)) %>%
+        mutate(pct = pct * 100) %>%
+        mutate(n.paste = sprintf("%g (%0.2f%%)",n,  pct)) %>%
+        select(model_outcome,
+               in_range_95,
+               pct) %>%
+        spread(in_range_95, pct) %>%
+        rename(`Inside 95% PI` = `inside`,
+               `Outside PI` = `outside`) %>%
+        select(-`Outside PI`) %>%
+        ungroup() %>%
+        rename(Outcome = model_outcome) %>%
+        mutate(Outcome = plyr::revalue(Outcome,
+                                       c(bmi="BMI",
+                                         fev1="FEV1 (%)",
+                                         dias="Diastolic BP",
+                                         sys="Systolic BP")))
+
+table_1_part_2 <-
+    obs_pred_summary_all %>%
+    group_by(model_outcome) %>%
+            group_by(model_outcome) %>%
+            filter(forecasted == FALSE) %>%
+            count(in_range_80) %>%
+            na.omit() %>%
+            mutate(pct = round((n / sum(n)), 4)) %>%
+            mutate(pct = pct * 100) %>%
+            # mutate_each(funs(parse_number), n, pct) %>%
+            mutate(n_paste = sprintf("%g (%0.2f%%)",n,  pct)) %>%
+            select(model_outcome,
+                   in_range_80,
+                   pct) %>%
+            spread(in_range_80, pct) %>%
+            rename(`Inside 80% PI` = `inside`,
+                   `Outside PI` = `outside`) %>%
+            select(-`Outside PI`) %>%
+            ungroup() %>%
+            rename(Outcome = model_outcome) %>%
+            mutate(Outcome = plyr::revalue(Outcome,
+                                           c(bmi="BMI",
+                                             fev1="FEV1 (%)",
+                                             dias="Diastolic BP",
+                                             sys="Systolic BP")))
+    
+```
+
+```{r actually-print-table-1}
+left_join(table_1_part_1,
+          table_1_part_2,
+          by = "Outcome") %>%
+    knitr::kable(caption = "Percent of observed values inside the 95% and 80% posterior prediction intervals and RSS for each model outcome.")
+
+```
+
+```{r combine-summary-results}
+
+jags_model_dt_summary_all <- 
+    bind_rows(jags_model_dt_summary_fev1,
+              jags_model_dt_summary_bmi,
+              jags_model_dt_summary_sys,
+              jags_model_dt_summary_dias)
+
+```
+
+```{r prepare-fig-four}
+
+### beta_d ---------------------------------------------------------------------
+jags_model_tidy_beta_d <- jags_model_dt_summary_all %>%
+    filter(grepl("^beta_d\\[", parameter))
+
+# there are 1804 unique individuals
+# n_distinct(dat_isba_15$uin)
+# so now we can look at those individuals who have an overall trend less than 0.
+
+# but first we are going to do this for each of the datasets
+
+uin_3_visits_bmi <- count(dat_isba_bmi,uin) %>%
+    filter(n >= 3) %>%
+    .$uin
+
+uin_3_visits_fev1 <- count(dat_isba_fev1,uin) %>%
+    filter(n >= 3) %>%
+    .$uin
+
+uin_3_visits_sys <- count(dat_isba_sys,uin) %>%
+    filter(n >= 3) %>%
+    .$uin
+
+uin_3_visits_dias <- count(dat_isba_dias,uin) %>%
+    filter(n >= 3) %>%
+    .$uin
+
+# then repeat this for bmi...sys.
+
+id_more_than_3_bmi <- dat_isba_bmi %>% 
+    mutate(which_uin = (uin %in% uin_3_visits_bmi)) %>%
+    filter(which_uin == TRUE) %>%
+    .$ID %>%
+    unique()
+
+id_more_than_3_fev1 <- dat_isba_fev1 %>% 
+    mutate(which_uin = (uin %in% uin_3_visits_fev1)) %>%
+    filter(which_uin == TRUE) %>%
+    .$ID %>%
+    unique()
+
+id_more_than_3_sys <- dat_isba_sys %>% 
+    mutate(which_uin = (uin %in% uin_3_visits_sys)) %>%
+    filter(which_uin == TRUE) %>%
+    .$ID %>%
+    unique()
+
+id_more_than_3_dias <- dat_isba_dias %>% 
+    mutate(which_uin = (uin %in% uin_3_visits_dias)) %>%
+    filter(which_uin == TRUE) %>%
+    .$ID %>%
+    unique()
+
+beta_d_3_vec_bmi <- sprintf("beta_d[%s]",id_more_than_3_bmi)
+beta_d_3_vec_fev1 <- sprintf("beta_d[%s]",id_more_than_3_fev1)
+beta_d_3_vec_sys <- sprintf("beta_d[%s]",id_more_than_3_sys)
+beta_d_3_vec_dias <- sprintf("beta_d[%s]",id_more_than_3_dias)
+
+
+model_beta_d_3_vis_bmi <- jags_model_tidy_beta_d %>%
+    filter(model_outcome == "bmi",
+           parameter %in% beta_d_3_vec_bmi)
+
+model_beta_d_3_vis_fev1 <- jags_model_tidy_beta_d %>%
+    filter(model_outcome == "fev1",
+           parameter %in% beta_d_3_vec_fev1)
+
+model_beta_d_3_vis_sys <- jags_model_tidy_beta_d %>%
+    filter(model_outcome == "sys",
+           parameter %in% beta_d_3_vec_sys)
+
+model_beta_d_3_vis_dias <- jags_model_tidy_beta_d %>%
+    filter(model_outcome == "dias",
+           parameter %in% beta_d_3_vec_dias)
+
+bind_3_vis <- bind_rows(
+    model_beta_d_3_vis_bmi,
+    model_beta_d_3_vis_fev1,
+    model_beta_d_3_vis_sys,
+    model_beta_d_3_vis_dias
+) %>%
+        arrange(model_outcome) %>%
+        group_by(model_outcome) %>%
+        mutate(highlight = if_else(q_02.5 < 0 & q_975 < 0 |
+                                       q_02.5 > 0 & q_975 > 0,
+                                   true = "highlight",
+                                   false = "lowlight")) %>%
+               # Terms = param_name) %>%
+        select(parameter,
+            # Terms,
+               q_02.5,
+               mean,
+               median,
+               q_975,
+               highlight,
+               pr_less_zero, 
+               model_outcome)
+
+```
+
+```{r fig-three, fig.height = 3, fig.width = 10, fig.cap = "Individuals whose parameter estimates for change over time, $\\beta_d$, were the furthest away from zero (and did not contain zero in the credible interval) for the health characteristics systolic blood pressure, FEV1%, diastolic blood pressure, and BMI."}
+
+
+# alternative method, which looks at just taking the lowest value
+library(magrittr) # get the %$% operator
+
+worst_id_num <-
+bind_3_vis %>%
+    # get the id number out
+    mutate(id_num = readr::parse_number(parameter)) %>%
+    # get the mean absolute difference from zero
+    mutate(abs_zero = abs(mean - 0)) %>%
+    # then group by model outcome
+    group_by(model_outcome) %>%
+    # identify which id numbers are 
+    filter(abs_zero == max(abs_zero)) %$%
+    # use the special exposition operator from magrittr
+    id_num
+
+# I visually identified these individuals: 1512, 341, 324, 94
+
+bind_3_vis %>%
+    # get the id number out
+    mutate(id_num = readr::parse_number(parameter)) %>%
+    # only select those with these four numbers, which I 
+    # have identified visually
+    filter(id_num %in% worst_id_num) %>%
+    mutate(scale_id_num = 
+               if_else(id_num == 94,
+                       1,
+                       if_else(id_num == 324,
+                               true = 2,
+                               if_else(id_num == 341,
+                                       3,
+                                       if_else(id_num == 1512,
+                                               4,
+                                               0))))) %>%
+    ggplot(aes(x = mean,
+               y = model_outcome,
+               colour = highlight)) +
+        geom_point(size = 1.5) +
+        geom_errorbarh(aes(xmin = q_02.5,
+                           xmax = q_975),
+                       height = 0.1,
+                       size = 1) +
+        labs(x = "",
+             y = "") +
+        geom_vline(xintercept = 0,
+                   colour = "coral",
+                   linetype = 2) +
+        scale_colour_manual(values = c("darkblue", "gray")) +
+        theme_minimal() +
+        theme(legend.position = "none",
+              axis.text.x= element_text(colour = "#003366",
+                                        size = 30),
+              axis.text.y= element_text(colour = "#003366",
+                                        size = 24)) %>%
+    scale_fill_gradient(low = "grey50", high = "darkblue") +
+    facet_grid(~scale_id_num, 
+               labeller = label_bquote(cols = paste(beta[d]))) +
+    theme_bw() +
+    theme(legend.position = "none", 
+          axis.text.x= element_text(angle = 45,
+                                    hjust = 1))
+
+```
+
+Figure 3 shows four selected "at risk" individuals and their posterior mean and
+credible intervals for the health characteristics systolic blood pressure,
+FEV1\%, diastolic blood pressure, and BMI. The proportion of individuals "at
+risk" for each health outcome, and the mean and standard deviation for each
+health outcome for those at risk and not at risk, are shown in Table 3.
+Individuals were identified as "at risk" in this case according to whether their
+parameter estimates for change over time $\beta_d$ were the furthermost away
+from zero (and did not contain zero in the credible interval) for the health
+characteristics systolic blood pressure, FEV1\%, diastolic blood pressure, and
+BMI. As described in the method section, these individuals had 3 or more visits.
+
+\newpage 
+
+```{r print-table-2}
+prop_in_out_data <- bind_3_vis %>%
+    mutate(ID = readr::parse_number(parameter)) %>%
+    select(ID, highlight) %>%
+    spread(key = model_outcome,
+           value = highlight,
+           sep = "_")  %>%
+    left_join(dat_isba_bmi,
+              key = "ID") %>%
+    select(ID,
+           model_outcome_bmi,
+           model_outcome_fev1,
+           model_outcome_sys,
+           model_outcome_dias,
+           bmi,
+           fev1_perc,
+           sys,
+           dias)
+
+prop_in_risk_sum <- function(data,
+                             ID = "ID",
+                             outcome_col,
+                             outcome){
+    
+    dat_sum <- data %>%
+    select_(outcome_col,
+            outcome) %>%
+    group_by_(outcome_col) %>%
+    summarise_if(is.numeric, 
+                 funs(mean, sd), 
+                 na.rm = TRUE) %>%
+        mutate(summary = sprintf("%0.2f (%0.2f)",mean,  sd),
+               # drop mean and sd
+               mean = NULL, 
+               sd = NULL) %>%
+        # hard coded, because plyr::revalue is hard
+        mutate(new_info = c("Mean (SD) at risk",
+                            "Mean (SD) not at risk")) %>%
+        select(new_info,
+               summary)
+    
+    # NSE is hard
+    names(dat_sum) <- c("summary",outcome)
+    
+    return(dat_sum)
+}
+    
+table_2 <- 
+prop_in_risk_sum(prop_in_out_data,
+                 outcome_col = "model_outcome_bmi",
+                 outcome = "bmi") %>%
+    left_join({prop_in_risk_sum(prop_in_out_data,
+                                outcome_col = "model_outcome_fev1",
+                                outcome = "fev1_perc")},
+              by = "summary") %>%
+    left_join({prop_in_risk_sum(prop_in_out_data,
+                 outcome_col = "model_outcome_sys",
+                 outcome = "sys")},
+              by = "summary") %>% 
+    left_join({prop_in_risk_sum(prop_in_out_data,
+                 outcome_col = "model_outcome_dias",
+                 outcome = "dias")}) %>%
+# also, this is the proportion of individuals who have three visits.
+    bind_rows({bind_3_vis %>%
+    group_by(model_outcome) %>%
+            summarise(prop_inside = round(mean(highlight == "highlight"),2)) %>%
+            mutate(prop_inside = as.character(prop_inside)) %>%
+            spread(key = model_outcome,
+                   value = prop_inside) %>%
+            rename(fev1_perc = fev1) %>%
+            mutate(summary = "Proportion at risk")}) %>%
+    mutate(row_order = c(3,2,1)) %>%
+    arrange(row_order) %>%
+    select(-row_order)
+
+names(table_2) <- c("Summary", 
+                    "BMI",
+                    "FEV1%",
+                    "Systolic",
+                    "Diastolic")
+
+    knitr::kable(table_2,
+                 caption = "The proportion of individuals with 3 or more visits who were 'at risk' (95% credible interval for change over time did not include zero) and the health outcomes for the 'at risk' and 'not at risk' groups")
+
+
+```
+
+Table 4 shows the posterior mean, 95% credible interval, and probability of being negative for each of the risk factors considered, namely smoking, dust, and days, since commencement.
+
+
+```{r fig-two-summary-all, fig.width = 6, fig.height = 6}
+
+# get all the beta single terms
+# beta_all[1] is the intercept, which we are not interested in.
+# keep in mind, that this is based on the idea that I am using the same
+# model.matrix as I was 4 months ago.
+# now, let's instead do something a bit more cleve, and look at the jags model
+# list used, and look at the head of the matrix, and the names.
+
+x_names <- colnames(jags_dat_model_bmi$X)
+which_col_seg <- grep("^SEG",x_names)
+full_vec <- 1:length(x_names)
+which_col_not_seg <- full_vec[grepl("^SEG",x_names) == FALSE]
+
+# find the names of these characters    
+# these are gender, smoked, dust
+beta_singles <- sprintf("beta_all[%s]", which_col_not_seg)
+
+# look at parameter beta_dc - the effect of DAY.
+
+jags_model_beta_day <- jags_model_dt_summary_all %>%
+    filter(grepl("^beta_dc", parameter))
+    
+
+# get the parameters from the data
+fig_two_data <- jags_model_dt_summary_all[parameter %in% beta_singles] %>%
+    bind_rows(jags_model_beta_day) %>%
+    arrange(model_outcome,parameter) %>%
+    group_by(model_outcome) %>%
+    mutate(term_names = c("gender",
+                          "smoking",
+                          "dust",
+                          "days"),
+           highlight = if_else(q_02.5 < 0 & q_975 < 0 |
+                                   q_02.5 > 0 & q_975 > 0,
+                               true = "highlight",
+                               false = "lowlight")) %>%
+    ungroup() %>%
+    select(term_names,
+           q_02.5,
+           mean,
+           median,
+           q_975,
+           highlight,
+           pr_less_zero,
+           everything())
+
+
+```
+
+```{r}
+
+table_1 <- fig_two_data %>%
+    select(term_names,
+           q_02.5,
+           mean,
+           q_975,
+           pr_less_zero,
+           model_outcome) %>% 
+    mutate(q_02.5 = round(q_02.5,2),
+           mean = round(mean,2),
+           q_975 = round(q_975,2),
+           pr_less_zero = round(pr_less_zero,2)) %>%
+    rename(Outcome = model_outcome,
+           Terms = term_names,
+           `L 95% CI` = q_02.5,
+           `U 95% CI` = q_975,
+           `P(Term < 0)` = pr_less_zero)
+    
+    # probability < 0 . if 0, it is 0 to 7 places.
+
+table_1_bmi <- table_1 %>%
+    filter(Outcome == "bmi") %>% 
+    select(-Outcome)
+
+table_1_fev1 <- table_1 %>% 
+    filter(Outcome == "fev1") %>%
+    select(-Outcome)
+
+table_1_sys <- table_1 %>% 
+    filter(Outcome == "sys") %>%
+    select(-Outcome)
+
+table_1_dias <- table_1 %>% 
+    filter(Outcome == "dias") %>%
+    select(-Outcome)
+
+```
+
+```{r background-creating-table-two}
+
+my_format <- function(x) format(x,scientific = TRUE, digits = 3)
+
+my_table_two_prep <- function(data){
+    
+    data %>%
+    mutate(est = my_format(mean),
+           cr_int = paste0(
+                           "(",
+                            my_format(`L 95% CI`),
+                            ", ",
+                            my_format(`U 95% CI`),
+                            ")"),
+           est_pr = paste0(my_format(`P(Term < 0)`))) 
+    
+}
+
+super_table_two <-
+fig_two_data %>%
+    select(term_names,
+           q_02.5,
+           mean,
+           q_975,
+           pr_less_zero,
+           model_outcome) %>% 
+    rename(Outcome = model_outcome,
+           Terms = term_names,
+           `L 95% CI` = q_02.5,
+           `U 95% CI` = q_975,
+           `P(Term < 0)` = pr_less_zero)
+
+super_table_two_days <- super_table_two %>% filter(Terms == "days")
+
+super_table_two_not_days <- super_table_two %>% filter(Terms != "days")
+
+super_table_two_not_days_summary_pt1 <- super_table_two_not_days %>% 
+    mutate(est = paste0(round(mean,2)),
+           cr_int = paste0("(",
+                         round(`L 95% CI`,2),
+                         ", ",
+                         round(`U 95% CI`,2),
+                         ")"),
+           est_pr = round(`P(Term < 0)`,2)) %>%
+    select(Terms,
+           Outcome,
+           est) %>%
+    filter(Terms != "gender") %>%
+    spread(key = Outcome,
+           value = est)
+
+super_table_two_not_days_summary_pt2 <- super_table_two_not_days %>% 
+    mutate(est = round(mean,2),
+           cr_int = paste0("(",
+                         round(`L 95% CI`,2),
+                         ", ",
+                         round(`U 95% CI`,2),
+                         ")"),
+           est_pr = round(`P(Term < 0)`,2)) %>%
+    select(Terms,
+           Outcome,
+           cr_int) %>%
+    filter(Terms != "gender") %>%
+    spread(key = Outcome,
+           value = cr_int)
+
+
+super_table_two_not_days_summary_pt3 <- super_table_two_not_days %>% 
+    mutate(est = round(mean,2),
+           cr_int = paste0("(",
+                         round(`L 95% CI`,2),
+                         ", ",
+                         round(`U 95% CI`,2),
+                         ")"),
+           est_pr = paste(round(`P(Term < 0)`,2))) %>%
+    select(Terms,
+           Outcome,
+           est_pr) %>%
+    filter(Terms != "gender") %>%
+    spread(key = Outcome,
+           value = est_pr)
+
+table_two_day_master <- my_table_two_prep(super_table_two_days)
+    
+
+new_summary_table_two <- bind_rows({
+    table_two_day_master %>%
+        select(Terms,
+               Outcome,
+               est) %>%
+        spread(key = Outcome,
+               value = est)
+},{
+        table_two_day_master %>%
+        select(Terms,
+               Outcome,
+               cr_int) %>%
+        spread(key = Outcome,
+               value = cr_int)
+    },{
+        table_two_day_master %>%
+        select(Terms,
+               Outcome,
+               est_pr) %>%
+        spread(key = Outcome,
+               value = est_pr)
+    }) %>%
+    bind_rows(super_table_two_not_days_summary_pt1,
+              super_table_two_not_days_summary_pt2,
+              super_table_two_not_days_summary_pt3) %>%
+    arrange(Terms) %>%
+    mutate(Terms = c("days",
+                     "",
+                     "",
+                     "dust",
+                     "",
+                     "",
+                     "smoking",
+                     "",
+                     "")) %>%
+    select(Terms, 
+           bmi,
+           fev1,
+           sys,
+           dias)
+    
+names(new_summary_table_two) <- c("Terms",
+                                  "BMI",
+                                  "FEV1%",
+                                  "Systolic",
+                                  "Diastolic"
+                                             )
+
+```
+
+\newpage
+
+
+-------------------------------------------------------------------------------------------------------------------------------------
+  Terms             BMI                                FEV1%                     Systolic                        Diastolic       
+--------- ------------------------------ ------------------------------ ------------------------------ ------------------------------
+  days       6.09 x 10^-4^                -8.44 x 10^-4^                 1.35 x 10^-3^                  1.78 x 10^-3^        
+
+          (4.72x10^-4^, 7.52x10^-4^)      (-1.41x10^-3^, -2.51x10^-4^)   (7.30x10^-4^, 1.97x10^-3^)       (1.34x10^-3^, 2.17x10^-3^) 
+
+                 0                         9.98 x 10^-1^                  0                                0        
+
+  dust             0.11                     0.33                          0.24                            -0.21         
+
+               (-0.06, 0.3)               (-0.52, 1.15)                   (-0.72, 1.16)                   (-0.92, 0.51)     
+
+                   0.11                     0.22                          0.31                            0.73          
+
+ smoking           -0.33                   -1.87                          0.47                            0.52          
+
+               (-0.72, 0.07)              (-3.24, -0.55)                  (-0.8, 1.79)                    (-0.38, 1.44)     
+
+                   0.94                      1                            0.24                            0.13          
+-------------------------------------------------------------------------------------------------------------------------------------
+
+Table: Estimated posterior mean, 95% credible intervals and probability of the effect of Day, Dust, and Smoking parameters being less than zero.
+
+The number of days since first visit had a substantive effect on all outcomes,
+and was associated with a decrease in FEV~1~\%, and a decrease in BMI,
+diastolic and systolic blood pressure. Dust did not have a substantive impact on
+any outcomes, but was associated with an 11\% chance of decreased BMI, a 22\%
+chance of decreased FEV~1~\%, a 31\% chance of decreased systolic blood
+pressure, and a 73\% chance of decreased diastolic blood pressure. Being a
+smoker was associated with substantively decreased FEV~1~\%, a 100\% chance
+of decreased FEV~1~ \%, a 95\% chance of decreased BMI, a 13\% chance of
+increased diastolic blood pressure, and a 24\% chance of increased systolic
+blood pressure.
+
+```{r fig-four, fig.width = 8, fig.out = "50%", fig.height = 5, fig.cap = "Posterior mean and 95% credible interval for exposure group parameters, for each model. The baseline exposure group is Administration."}
+# jags_model_dt_summary_all
+
+x_names <- colnames(jags_dat_model_bmi$X)
+
+which_col_seg <- grep("^SEG",x_names)
+
+# which columns are for SEG?
+which_col_seg <- grep("^SEG",x_names)
+
+    beta_segs <- sprintf("beta_all[%s]", which_col_seg)
+    
+    fig_three_data <-
+        jags_model_dt_summary_all[parameter %in% beta_segs] %>%
+        mutate(param_num = readr::parse_number(parameter),
+               param_name = param_labeller_seg(param_num, 
+                                               which_col_seg),
+               param_name_2 = label_seg_simple(param_num)) %>%
+        arrange(model_outcome, param_num) %>%
+        group_by(model_outcome) %>%
+        mutate(highlight = if_else(q_02.5 < 0 & q_975 < 0 |
+                                       q_02.5 > 0 & q_975 > 0,
+                                   true = "highlight",
+                                   false = "lowlight"),
+               Terms = param_name_2) %>%
+        select(Terms,
+               q_02.5,
+               mean,
+               median,
+               q_975,
+               highlight,
+               pr_less_zero, 
+               model_outcome)
+
+    
+new_exposure_group <- c("Administration",
+                        "Emergency",
+                        "Exterior Maintenance",
+                        "Technicians",
+                        "Technology",
+                        "Interior Maintenance",
+                        "Field Experts")
+  
+fig_three_data %>%
+    mutate(pr_less_zero = round(pr_less_zero, 2)) %>%
+    # filter down the appropriate groups
+    filter(Terms %in% new_exposure_group) %>%
+    mutate(facet_names = case_when(
+        model_outcome == "bmi" ~ "BMI",
+        model_outcome == "dias" ~ "Diastolic Blood Pressure",
+        model_outcome == "sys" ~ "Systolic Blood Pressure",
+        model_outcome == "fev1" ~ "FEV1%"
+    )) %>%
+    ggplot(aes(x = mean,
+               y = reorder(Terms, mean),
+               colour = highlight)) +
+        geom_point(size = 2) +
+        geom_errorbarh(aes(xmin = q_02.5,
+                           xmax = q_975),
+                       height = 0.2,
+                       size = 0.5) +
+        labs(x = "",
+             y = "") +
+        geom_vline(xintercept = 0,
+                   colour = "coral",
+                   linetype = 2) +
+        scale_colour_manual(values = c("darkblue", "gray")) +
+        theme_minimal() +
+        theme(legend.position = "none",
+              axis.text.x= element_text(colour = "#003366",
+                                        size = 30),
+              axis.text.y= element_text(colour = "#003366",
+                                        size = 24)) %>%
+    scale_fill_gradient(low = "grey50", high = "darkblue") +
+    facet_wrap(~facet_names) +
+    theme_bw() +
+    theme(legend.position = "none")
+
+# If I want to preserve the order of the mean in each facet, I'll have to do something like this:
+# https://stackoverflow.com/questions/24255305/varying-factor-order-in-each-facet-of-ggplot2
+
+```
+
+All exposure group effects were compared to the baseline Administration, and the effects for each outcome over all exposure groups are shown in Figure 4. BMI
+was substantively lower in Maintenance, Emergency, and Field Experts. Diastolic
+blood pressure was substantively lower in Technology and Field Expert exposure
+groups. Technologists had substantively lower systolic blood pressure, and
+Technicians had substantively higher FEV~1~\%.
+
+```{r plot-figure-five,fig.height = 8, fig.width = 8}
+
+# add a separate hline for bmi, dias, fev1, sys.
+
+dat_hline <- tibble::tribble(
+    ~model_outcome, ~value,
+          "bmi",      30,
+          "dias",     90,
+          "fev1",     70,
+          "sys",      140
+)
+
+# jags_model_dt_summary_y
+fig_five_data_forecasted <-
+    obs_pred_summary_all %>%
+    mutate(last_observed = lead(forecasted),
+           last_two = last_observed + forecasted) %>%
+    filter(last_two == 1) %>%
+    mutate(pr_chronic_disease = round(pr_chronic_disease,4))
+
+# this is the complement to the previous dataframe
+fig_five_data_observed <- 
+    obs_pred_summary_all %>%
+    filter(forecasted == FALSE)
+
+```
+
+Figure 5 shows the same four selected individuals previously identified as being
+"at risk", from Figure 3, and the observed and predicted values for health
+outcomes. Observed outcomes are shown as blue points and model mean posterior
+values are shown as a blue line. The dark blue ribbon around the blue line
+represents an 80\% credible interval, and the light blue ribbon the 95\% credible
+interval. A one year forecast is shown as a red line extending from the blue
+line, and similarly the 80\% and 95\% credible intervals are displayed. A dotted
+line is shown for each outcome, which represents a clinically relevant threshold
+of chronic disease for each outcome. Individual probabilities of chronic condition
+in the one year forecast are labelled directly on Figure 5.
+
+
+```{r fig-five, fig.height = 8, fig.width = 10, fig.out = "80%", fig.cap = "Individuals from Figure 3 and their observed (points), predicted (blue region and line), and forecasted (red region and lines) values for the health outcomes shown with 80% (darker region) and 95% credible intervals (lighter region). Labels show the probability of the individual having a clinically defined chronic disease at the forecasted timepoint."}
+
+paste_3_letters <- function() paste0(sample(LETTERS,3), collapse = "")
+
+id_94 <- sprintf("194-%s", paste_3_letters())
+id_324 <- sprintf("1324-%s", paste_3_letters())
+id_341 <- sprintf("1341-%s", paste_3_letters())
+id_1512 <- sprintf("11512-%s", paste_3_letters())
+
+fig_five_plot_data <- fig_five_data_observed %>%
+    filter(ID %in% worst_id_num) %>%
+    mutate(ID = case_when(
+        ID == 94 ~ id_94,
+        ID == 324 ~ id_324,
+        ID == 341 ~ id_341,
+        ID == 1512 ~ id_1512
+    ))
+
+
+fig_five_plot_data_forecast <- fig_five_data_forecasted %>%
+    filter(ID %in% worst_id_num) %>%
+    mutate(ID = case_when(
+        ID == 94 ~ id_94,
+        ID == 324 ~ id_324,
+        ID == 341 ~ id_341,
+        ID == 1512 ~ id_1512
+    ))
+
+ggplot(fig_five_plot_data,
+           aes(x = days_since_arrival,
+               y = pred_mean,
+               group = ID)) +
+    geom_line(colour = "steelblue") +
+    geom_ribbon(aes(ymin = pred_025,
+                    ymax = pred_975),
+                alpha = 0.25,
+                fill = "steelblue") +
+    geom_ribbon(aes(ymin = pred_010,
+                    ymax = pred_90),
+                alpha = 0.25,
+                fill = "navyblue") +
+    geom_point(aes(y = outcome),
+               colour = "steelblue") +
+    geom_line(data = fig_five_plot_data_forecast,
+              aes(x = days_since_arrival,
+                  y = pred_mean),
+              colour = "coral",
+              linetype = 1) +
+    geom_ribbon(data = fig_five_plot_data_forecast,
+                aes(ymin = pred_025,
+                    ymax = pred_975),
+                alpha = 0.25,
+                fill = "coral") +
+    geom_ribbon(data = fig_five_plot_data_forecast,
+                aes(ymin = pred_010,
+                    ymax = pred_90),
+                alpha = 0.25,
+                fill = "red") +
+    theme_bw() +
+    # facet_wrap(~ID) + 
+    labs(x = "Days Since Arrival",
+         y = "Outcome") +
+    facet_grid(model_outcome~ID,
+               scales = "free_y",
+               switch = "y") +
+    geom_hline(data = dat_hline,
+               aes(yintercept = value),
+               colour = "red",
+               linetype = 3) + 
+    geom_label(data = filter(fig_five_plot_data_forecast, forecasted == TRUE),       
+               aes(label = round(pr_chronic_disease,2),
+                   vjust = 2),
+               colour = "white",
+               fill = "salmon")
+    
+```
+
+
+
+```{r table-of-pr-chronic-disease}
+
+forecasted_chronic_disease <- fig_five_data_forecasted %>% 
+    filter(ID %in% worst_id_num,
+           forecasted == TRUE) %>%
+    select(model_outcome,
+           ID,
+           pr_chronic_disease) %>%
+    mutate(pr_chronic_disease = round(pr_chronic_disease,4)) %>%
+    spread(key = model_outcome,
+           value = pr_chronic_disease) 
+
+```
+
+# Discussion
+
+This paper set out to develop a Bayesian approach to analysing OHS data and to
+illustrate three analytic aims focussed on the health outcomes lung function
+(FEV~1~\%), Body Mass Index (BMI), and systolic and diastolic blood pressure.
+Aim 1 investigated patterns and trends in the health outcomes. Aim 2 explored
+the effects of smoking and industrial exposures over time for individuals and
+worker groups. Aim 3 identified future individual risk of chronic conditions.
+
+Aim 1 was addressed by examining individual change over time and identifying
+individuals with the greatest degree of change over time for each outcome. We
+demonstrated how one could then assess the overall change over time for these
+individuals, which could be used to identify trends in other health outcomes. We
+also identified the proportion of individuals who fell into an "at risk"
+category. Identifying those individuals with substantive negative change in BMI,
+lung function, systolic, and diastolic blood pressure means that medical
+professionals could flag these individuals as at risk (compared to the overall
+worker population), and provide more frequent medical attention to better
+monitor their health.
+
+Aim 2 was addressed by examining the probability that the effects of smoking and
+dust were different from zero for each outcome, finding those exposure groups
+that were substantively different from the reference group (Administration), and
+identifying individuals at risk based on substantive change over time in health
+outcomes. Smoking was associated with negative health outcomes for lung function
+and systolic and diastolic blood pressure. This information can be used to
+further support health policies, such as implementation of tobacco bans in the
+workplace.
+
+The nominated industrial exposure, dust was not substantively associated with
+health outcomes in the workplaces in this case study. The relevant parameter
+estimates had quite wide credible intervals, possibly due to interpolation of
+the data, which was used to align dust measurement points with health
+measurements. This demonstrates that frequent measurements of industrial
+exposures of concern can provide more certainty in the measurement of effects.
+Interestingly, results identified that employees in Administration should be
+more closely monitored and perhaps should be the focus of health interventions
+and healthy worker programs in workplaces. Providing descriptive statistics
+of the outcomes for at risk and not at risk populations (Table 3) provides
+medical professionals with a measure of how meaningfully different these
+populations are, and facilitates more targeted health and wellness programs.
+
+Aim 3 was addressed by calculating posterior predictions and corresponding
+intervals and one year forecasts for all individuals. This allows medical
+professionals to assign a probability that an individual might move into an "at
+risk" category one year from their last visit. This means that individuals may
+be flagged as "at risk" and further action can be taken, perhaps in the form of
+more frequent medical visits to more closely monitor their health measures. his
+demonstrates how forecasting could identify "at risk" individuals, by placing a
+threshold on the probability of health outcomes being medically classified as
+chronic or acute conditions. Some individuals might cross the threshold over
+the observed times, whilst others might be predicted to enter the threshold with
+a given probability over the next year.
+
+The Bayesian hierarchical model accounts for important features of data such as
+multiple measurements for individuals, and the exposure group structure in the 
+workplace. The definition of a Bayesian credible interval as a
+range of probable values for a parameter makes it easier to communicate model
+inferences. The model also provides probabilities of interest directly,
+conditional on the data. This is a useful complement to credible intervals.
+Forecasting of future observations in a Bayesian framework also allows for
+probabilistic statements based directly on the posterior predictive
+distribution. The Bayesian framework naturally includes additional
+uncertainty due to imputation of missing values. These features compare
+favourably to their frequentist modelling counterparts.
+
+Extensions to the Bayesian models developed here are also straightforward. For
+example, an obvious next step in analysis might be to add interactions into the model, such as smoking and dust, or BMI and blood pressure. One relatively straightforward way to explore the impact of interactions is to evaluate the Bayes factors for each variable, approximated using the Savage-Dickey density ratio, which only requires samples from the posterior [@Wagenmakers2010 ; Dickey1970]. This can add time to the model building process, in terms of deciding upon the most useful model, but is worth the effort if the practitioner is genuinely interested in one or two interaction terms. As with any working population, there may be some healthy cohort effect
+[@Li1999; @McMichael1974], where, being employable, employees are healthier than
+the general population.  The methods provided in this study identify employees
+and groups that are different from the population. Combining this information
+with reference chronic conditions provides a more comprehensive approach which
+might otherwise have missed healthy employees.
+
+It is also possible that there may perhaps be
+less measurement error for long term employees; here a model that predicts the
+number of visits for each individual may be useful, where the number of visits
+$n_{0i}$ for each individual is the outcome. Additionally, there may be some
+correlation between the slope and the intercept, which could be accounted for by
+modelling them as coming from some bivariate normal distribution [@BDA3]. It is acknowledged that the model fit is not ideal, particularly with respect to underestimation and overestimation of very high and low values, respectively. While this regression to the mean is to be expected given the random effects terms, the fit could be improved for the other outcomes, perhaps by including interactions as previously discussed.
+
+As far as we are aware, this is the first time Bayesian methods have been
+applied to this kind of OHS data. It is our hope that this paper can serve as
+one way to fit and interpret these data, and serve as encouragement for researchers in
+the field of OHS, to include Bayesian approaches in
+their analytic toolkit. The ultimate ambition is to provide more informative
+evidence-based OHS assessments for a healthier workforce and more profitable
+workplaces.
+
+## Acknowledgements
+
+The authors would like to thank Dr. Xing Lee and Dr. Nicole White for their advice
+and collaboration with this project.
+
+
+# References
